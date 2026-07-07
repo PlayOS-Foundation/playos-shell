@@ -32,6 +32,17 @@ FetchContent_Declare(raylib
     GIT_TAG 5.5)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+
+# On Linux the shell runs as a Wayland client of the PlayOS compositor. Enable
+# PLAYOS_SHELL_WAYLAND to build Raylib's GLFW with the Wayland backend (only)
+# instead of X11. Requires wayland-protocols and libxkbcommon-dev. Off by
+# default so the standard desktop (X11) build is unaffected.
+option(PLAYOS_SHELL_WAYLAND "Build the shell for Wayland (Linux)" OFF)
+if(PLAYOS_SHELL_WAYLAND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(raylib)
 
 add_executable(playos-shell src/main.cpp)
@@ -39,5 +50,3 @@ target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
     PlayOS::Runtime
     raylib)
-
-# On Windows, build as a console app for now so we see diagnostics.

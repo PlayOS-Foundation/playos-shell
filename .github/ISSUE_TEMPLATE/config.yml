@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: PlayOS Specification (source of truth)
+    url: https://github.com/PlayOS-Foundation/playos-spec
+    about: Platform behavior is specified here first. Read the book, RFCs, and ADRs before implementing.
