@@ -113,12 +113,19 @@ int main(int argc, char** argv) {
     const fs::path exeDir =
         fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
 
+    // Fullscreen on Linux (console experience), windowed on Windows
+    // (convenient for development). On a runtime device the compositor
+    // fullscreens every Wayland client surface regardless.
+#ifdef __linux__
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    // W=0, H=0 with FLAG_FULLSCREEN_MODE tells Raylib to use the monitor's
-    // native resolution automatically.
     InitWindow(0, 0, "PlayOS Shell");
     const int W = GetScreenWidth();
     const int H = GetScreenHeight();
+#else
+    const int W = 1280;
+    const int H = 720;
+    InitWindow(W, H, "PlayOS Shell");
+#endif
     SetTargetFPS(60);
     HideCursor();
 
@@ -257,8 +264,10 @@ int main(int argc, char** argv) {
         if (launchRequested) {
             const auto& game = library[selected];
 
+#ifdef __linux__
             // Exit fullscreen so the launched game window is visible on top.
             ToggleFullscreen();
+#endif
 
             // Fade-out transition (~0.5 s)
             for (int f = 0; f < 30; ++f) {
@@ -273,8 +282,10 @@ int main(int argc, char** argv) {
             const auto result =
                 PlayOS::Runtime::LaunchAndWait(game.executable, game.args);
 
+#ifdef __linux__
             // Restore fullscreen after the game exits.
             ToggleFullscreen();
+#endif
 
             // Fade-in transition
             for (int f = 0; f < 20; ++f) {
