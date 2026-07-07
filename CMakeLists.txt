@@ -50,6 +50,12 @@ target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
     PlayOS::playos-input-raylib
     PlayOS::playos-display-raylib
-    PlayOS::playos-storage-platform
     PlayOS::Runtime
     raylib)
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(playos-shell PRIVATE PlayOS::playos-storage-windows)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(playos-shell PRIVATE PlayOS::playos-storage-linux)
+else()
+    target_link_libraries(playos-shell PRIVATE PlayOS::playos-storage-null)
+endif()
