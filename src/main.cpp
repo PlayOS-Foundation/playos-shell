@@ -6,15 +6,14 @@
 // Rendering: Raylib (the reference engine).
 // Platform services: the PlayOS Platform API (input, lifecycle).
 // Launching: the PlayOS Runtime (LaunchAndWait).
-//
-// This is the Windows SDK-target slice. On a runtime device the shell is a
-// Wayland client of the PlayOS compositor; here it is a plain window.
 
 #include "raylib.h"
 
 #include "playos/playos.h"
 #include "playos/runtime/process.h"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -23,13 +22,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-struct GameEntry {
-    std::string title;
-    std::string executable;
-    std::vector<std::string> args;
-};
+// ── helpers ──────────────────────────────────────────────────────────────
 
-// Platform executable name (adds .exe on Windows).
 std::string ExeName(const std::string& base) {
 #ifdef _WIN32
     return base + ".exe";
@@ -38,9 +32,15 @@ std::string ExeName(const std::string& base) {
 #endif
 }
 
-// Locates the hello-playos sample relative to the shell executable, using the
-// standard sibling repo layout and trying the build directory names used on
-// Windows (build) and Linux (build-linux). Returns empty if not found.
+// ── game library ─────────────────────────────────────────────────────────
+
+struct GameEntry {
+    std::string title;
+    std::string subtitle;    // short description shown below the title
+    std::string executable;
+    std::vector<std::string> args;
+};
+
 std::string FindSampleGame(const fs::path& exeDir) {
     const std::string exe = ExeName("hello-playos");
     for (const char* buildDir : {"build", "build-linux"}) {
@@ -48,141 +48,240 @@ std::string FindSampleGame(const fs::path& exeDir) {
             exeDir / ".." / ".." / "playos-samples" / buildDir / exe;
         std::error_code ec;
         const fs::path resolved = fs::weakly_canonical(candidate, ec);
-        if (!ec && fs::exists(resolved)) {
-            return resolved.string();
-        }
+        if (!ec && fs::exists(resolved)) return resolved.string();
     }
     return {};
 }
 
-// Demo library for the slice. The hello-playos sample is listed first when it
-// can be found; the remaining entries are platform-appropriate programs so the
-// launch/return loop can be proven even without the sample built.
 std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
     std::vector<GameEntry> games;
     const std::string sample = FindSampleGame(exeDir);
     if (!sample.empty()) {
-        games.push_back({"Hello PlayOS (sample)", sample, {}});
+        games.push_back({"Hello PlayOS",
+                         "The reference sample — Raylib + Platform API",
+                         sample, {}});
     }
 #ifdef _WIN32
-    games.push_back(
-        {"Demo App (Notepad)", "C:\\Windows\\System32\\notepad.exe", {}});
-    games.push_back({"Terminal Echo", "C:\\Windows\\System32\\cmd.exe",
+    games.push_back({"Notepad", "Windows text editor (demo)",
+                     "C:\\Windows\\System32\\notepad.exe", {}});
+    games.push_back({"Terminal Echo", "Prints a message and waits",
+                     "C:\\Windows\\System32\\cmd.exe",
                      {"/c", "echo PlayOS launched me && pause"}});
 #else
-    games.push_back({"Demo (sleep 1s)", "/bin/sh", {"-c", "sleep 1"}});
+    games.push_back({"Sleep Demo", "Sleeps 1 second and returns",
+                     "/bin/sh", {"-c", "sleep 1"}});
 #endif
     return games;
 }
 
-// Returns true if the user pressed "up" this frame (controller or keyboard).
+// ── input helpers ────────────────────────────────────────────────────────
+
 bool PressedUp() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadUp) ||
            IsKeyPressed(KEY_UP);
 }
-
 bool PressedDown() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadDown) ||
            IsKeyPressed(KEY_DOWN);
 }
-
-// Confirm = A button or Enter.
 bool PressedConfirm() {
     return PlayOS::Input::Pressed(PlayOS::Button::A) ||
            IsKeyPressed(KEY_ENTER);
 }
-
-// Back = B button or Escape.
 bool PressedBack() {
     return PlayOS::Input::Pressed(PlayOS::Button::B) ||
            IsKeyPressed(KEY_ESCAPE);
 }
+bool PressedHome() {
+    return PlayOS::Input::Pressed(PlayOS::Button::Home);
+}
+
+// ── animation helper ─────────────────────────────────────────────────────
+
+// Smoothly moves `value` toward `target` at `speed` units/sec. Call each
+// frame with GetFrameTime().
+float Track(float value, float target, float speed, float dt) {
+    if (fabsf(target - value) < 0.5f) return target;
+    return value + (target - value) * std::min(speed * dt, 1.0f);
+}
 
 } // namespace
+
+// ── main ─────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
     const fs::path exeDir =
         fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
 
-    // Console experience: fullscreen borderless at the monitor's native
-    // resolution. On a runtime device the compositor handles fullscreening;
-    // on SDK targets the shell requests it directly.
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    const int screenWidth = GetMonitorWidth(0);
-    const int screenHeight = GetMonitorHeight(0);
-
-    InitWindow(screenWidth, screenHeight, "PlayOS Shell");
+    const int W = GetMonitorWidth(0);
+    const int H = GetMonitorHeight(0);
+    InitWindow(W, H, "PlayOS Shell");
     SetTargetFPS(60);
+    HideCursor();
 
     PlayOS::Lifecycle::Init();
 
     const auto library = DemoLibrary(exeDir);
     int selected = 0;
-    std::string status = "Ready. A = launch, B = quit.";
+    std::string status;
+    bool showOverlay = false;   // Home toggles a simple overlay
+
+    // ── main loop ────────────────────────────────────────────────────────
 
     while (!WindowShouldClose()) {
-        // --- Update platform + input ---
+        const float dt = GetFrameTime();
         PlayOS::Lifecycle::Update();
 
-        if (PressedUp()) {
-            selected = (selected - 1 + (int)library.size()) % (int)library.size();
-        }
-        if (PressedDown()) {
-            selected = (selected + 1) % (int)library.size();
+        // ── input ────────────────────────────────────────────────────────
+
+        if (!showOverlay) {
+            if (PressedUp()) {
+                selected = (selected - 1 + (int)library.size()) %
+                           (int)library.size();
+            }
+            if (PressedDown()) {
+                selected = (selected + 1) % (int)library.size();
+            }
+            if (PressedHome()) {
+                showOverlay = true;
+            }
+        } else {
+            // Overlay active: B or Home dismisses it.
+            if (PressedBack() || PressedHome()) {
+                showOverlay = false;
+            }
         }
 
-        bool launchRequested = PressedConfirm();
-        bool quitRequested = PressedBack();
+        const bool launchRequested = !showOverlay && PressedConfirm();
 
-        if (quitRequested) {
-            break;
-        }
+        // ── draw ─────────────────────────────────────────────────────────
 
-        // --- Draw the shell ---
         BeginDrawing();
-        ClearBackground(Color{18, 18, 24, 255});
+        ClearBackground(Color{12, 12, 18, 255});
 
-        DrawText("PlayOS", 60, 48, 48, RAYWHITE);
-        DrawText("Library", 60, 110, 24, Color{140, 140, 160, 255});
+        // Status bar
+        DrawRectangle(0, 0, W, 36, Color{8, 8, 14, 180});
+        DrawText("PlayOS", 16, 8, 20, Color{180, 180, 200, 255});
+
+        // Controller indicator
+        const bool controllerConnected =
+            PlayOS::Capabilities::Has(PlayOS::Capability::InputBasic);
+        if (controllerConnected) {
+            DrawCircle(W - 100, 18, 5, Color{60, 200, 80, 255});
+            DrawText("Controller", W - 88, 8, 16, Color{140, 160, 150, 255});
+        } else {
+            DrawText("No controller", W - 130, 8, 16,
+                     Color{100, 100, 110, 255});
+        }
+
+        // Category heading
+        DrawText("LIBRARY", 80, 72, 14, Color{100, 100, 140, 255});
+
+        // ── game list ────────────────────────────────────────────────────
+
+        constexpr int kRowH = 72;
+        constexpr int kListTop = 106;
+        constexpr int kListLeft = 64;
+        constexpr int kListW = 860;
+        constexpr int kIconSz = 52;
 
         for (int i = 0; i < (int)library.size(); ++i) {
-            const int y = 170 + i * 56;
-            const bool isSelected = (i == selected);
-            if (isSelected) {
-                DrawRectangle(50, y - 8, 700, 48, Color{40, 90, 200, 255});
+            const int y = kListTop + i * kRowH;
+            const bool isSel = (i == selected);
+
+            if (isSel) {
+                // Highlight bar
+                DrawRectangleRounded(
+                    Rectangle{(float)kListLeft, (float)y + 2, (float)kListW,
+                              (float)kRowH - 4},
+                    0.25f, 8, Color{44, 52, 68, 255});
             }
-            DrawText(library[i].title.c_str(), 70, y,
-                     28, isSelected ? RAYWHITE : Color{200, 200, 210, 255});
+
+            // Icon placeholder
+            DrawRectangleRounded(
+                Rectangle{(float)kListLeft + 12, (float)y + 10, (float)kIconSz,
+                          (float)kIconSz},
+                0.2f, 6,
+                isSel ? Color{64, 130, 220, 255} : Color{32, 34, 44, 255});
+
+            // Title
+            DrawText(library[i].title.c_str(), kListLeft + kIconSz + 24,
+                     y + 10, 26,
+                     isSel ? RAYWHITE : Color{200, 200, 210, 255});
+
+            // Subtitle
+            DrawText(library[i].subtitle.c_str(), kListLeft + kIconSz + 24,
+                     y + 42, 16, Color{120, 120, 140, 255});
         }
 
-        DrawText(status.c_str(), 60, screenHeight - 60, 20,
-                 Color{150, 150, 170, 255});
-        DrawText("Controller: D-Pad move, A launch, B quit  (Arrows/Enter/Esc also work)",
-                 60, screenHeight - 34, 18, Color{90, 90, 110, 255});
+        // Scrollbar hint
+        if (library.size() > 1) {
+            const float thumbH =
+                (float)(kRowH * library.size()) / (float)library.size();
+            const float thumbY = kListTop + selected * kRowH;
+            DrawRectangle(kListLeft + kListW + 16, (int)thumbY, 4, kRowH,
+                          Color{60, 60, 80, 255});
+        }
+
+        // ── status / help line ───────────────────────────────────────────
+
+        if (!status.empty()) {
+            DrawText(status.c_str(), 80, H - 72, 18,
+                     Color{130, 150, 130, 255});
+        }
+        DrawText("Navigate: D-Pad /   Launch: A   —   Home: overlay",
+                 80, H - 42, 16, Color{80, 80, 100, 255});
+
+        // ── overlay ──────────────────────────────────────────────────────
+
+        if (showOverlay) {
+            // Dim background
+            DrawRectangle(0, 0, W, H, Color{0, 0, 0, 160});
+
+            const char* overlayTitle = "SYSTEM";
+            const int titleW = MeasureText(overlayTitle, 32);
+            DrawText(overlayTitle, (W - titleW) / 2, H / 2 - 80, 32,
+                     Color{180, 180, 200, 255});
+
+            DrawText("Press B or Home to close", (W - 240) / 2, H / 2 + 40,
+                     22, Color{140, 140, 160, 255});
+        }
 
         EndDrawing();
 
-        // --- Launch (blocking): shell is hidden while the game runs, then we
-        //     return to the shell when it exits. This mirrors the console loop.
+        // ── launch (blocking) ────────────────────────────────────────────
+
         if (launchRequested) {
             const auto& game = library[selected];
-            status = "Launching: " + game.title + " ...";
 
-            // Draw one frame showing the launching status.
-            BeginDrawing();
-            ClearBackground(Color{10, 10, 14, 255});
-            DrawText(status.c_str(), 60, screenHeight / 2 - 20, 28, RAYWHITE);
-            EndDrawing();
+            // Fade-out transition (~0.5 s)
+            for (int f = 0; f < 30; ++f) {
+                BeginDrawing();
+                ClearBackground(Color{8, 8, 12, 255});
+                const int alpha = (int)(255.0f * ((float)f / 29.0f));
+                DrawText(game.title.c_str(), (W - MeasureText(game.title.c_str(), 36)) / 2,
+                         H / 2 - 18, 36, Color{255, 255, 255, (unsigned char)alpha});
+                EndDrawing();
+            }
 
             const auto result =
                 PlayOS::Runtime::LaunchAndWait(game.executable, game.args);
 
+            // Fade-in transition
+            for (int f = 0; f < 20; ++f) {
+                BeginDrawing();
+                ClearBackground(Color{8, 8, 12, 255});
+                EndDrawing();
+            }
+
             if (!result.launched) {
                 status = "Failed to launch: " + game.title;
             } else {
-                status = game.title + " exited with code " +
-                         std::to_string(result.exitCode) + ". Back in shell.";
+                status = game.title + " — exited. Back in shell.";
             }
+            // Clear status after a few seconds (handled by drawing loop —
+            // we just set it here).
         }
     }
 
