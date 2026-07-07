@@ -29,7 +29,7 @@ playos_add_dependency(playos-runtime)
 # Platform API, Raylib-friendly shell).
 FetchContent_Declare(raylib
     GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG 5.5)
+    GIT_TAG 6.0)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 
@@ -48,5 +48,8 @@ FetchContent_MakeAvailable(raylib)
 add_executable(playos-shell src/main.cpp)
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
+    PlayOS::playos-input-raylib
+    PlayOS::playos-display-raylib
+    PlayOS::playos-storage-platform
     PlayOS::Runtime
     raylib)

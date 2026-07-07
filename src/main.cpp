@@ -76,39 +76,28 @@ std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
 
 // ── input helpers ────────────────────────────────────────────────────────
 //
-// Try the PlayOS Platform API first (XInput / evdev), then fall back to
-// Raylib's built-in gamepad support. Raylib's GLFW layer handles gamepads
-// that aren't XInput-native (DualSense, Switch Pro, etc.), which is
-// essential on Windows where XInput only sees Xbox-compatible devices.
+// All input goes through the PlayOS Platform API. The linked input backend
+// (playos-input-raylib for the PoC) handles gamepad mapping and keyboard
+// fallback.
 
 bool PressedUp() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadUp) ||
-           IsKeyPressed(KEY_UP) ||
-           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_UP);
+           IsKeyPressed(KEY_UP);
 }
 bool PressedDown() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadDown) ||
-           IsKeyPressed(KEY_DOWN) ||
-           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_DOWN);
+           IsKeyPressed(KEY_DOWN);
 }
 bool PressedConfirm() {
     return PlayOS::Input::Pressed(PlayOS::Button::A) ||
-           IsKeyPressed(KEY_ENTER) ||
-           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+           IsKeyPressed(KEY_ENTER);
 }
 bool PressedBack() {
     return PlayOS::Input::Pressed(PlayOS::Button::B) ||
-           IsKeyPressed(KEY_ESCAPE) ||
-           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT);
+           IsKeyPressed(KEY_ESCAPE);
 }
 bool PressedHome() {
-    return PlayOS::Input::Pressed(PlayOS::Button::Home) ||
-           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE);
-}
-
-bool ControllerConnected() {
-    return PlayOS::Input::ControllerConnected() ||
-           IsGamepadAvailable(0);
+    return PlayOS::Input::Pressed(PlayOS::Button::Home);
 }
 
 // ── animation helper ─────────────────────────────────────────────────────
@@ -131,17 +120,18 @@ int main(int argc, char** argv) {
     // Fullscreen on Linux (console experience), windowed on Windows
     // (convenient for development). On a runtime device the compositor
     // fullscreens every Wayland client surface regardless.
+    auto displayInfo = PlayOS::Display::Current();
 #ifdef __linux__
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
     InitWindow(0, 0, "PlayOS Shell");
     const int W = GetScreenWidth();
     const int H = GetScreenHeight();
 #else
-    const int W = 1280;
-    const int H = 720;
+    const int W = displayInfo.width > 0 ? displayInfo.width : 1280;
+    const int H = displayInfo.height > 0 ? displayInfo.height : 720;
     InitWindow(W, H, "PlayOS Shell");
 #endif
-    SetTargetFPS(60);
+    SetTargetFPS(displayInfo.refreshRate > 0 ? displayInfo.refreshRate : 60);
     HideCursor();
 
     PlayOS::Lifecycle::Init();
@@ -189,7 +179,7 @@ int main(int argc, char** argv) {
         DrawText("PlayOS", 16, 8, 20, Color{180, 180, 200, 255});
 
         // Controller indicator
-        if (ControllerConnected()) {
+        if (PlayOS::Input::ControllerConnected()) {
             DrawCircle(W - 100, 18, 5, Color{60, 200, 80, 255});
             DrawText("Controller", W - 88, 8, 16, Color{140, 160, 150, 255});
         } else {
@@ -268,6 +258,14 @@ int main(int argc, char** argv) {
 
             DrawText("Press B or Home to close", (W - 240) / 2, H / 2 + 40,
                      22, Color{140, 140, 160, 255});
+
+            // Storage info (proves storage backend is wired)
+            const char* savePath = PlayOS::Storage::SavePath();
+            const char* cfgPath  = PlayOS::Storage::ConfigPath();
+            DrawText(TextFormat("Saves: %s", savePath),
+                     40, H - 80, 14, Color{100, 100, 130, 255});
+            DrawText(TextFormat("Config: %s", cfgPath),
+                     40, H - 58, 14, Color{100, 100, 130, 255});
         }
 
         EndDrawing();
