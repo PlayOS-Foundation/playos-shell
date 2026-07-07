@@ -255,6 +255,9 @@ int main(int argc, char** argv) {
         if (launchRequested) {
             const auto& game = library[selected];
 
+            // Exit fullscreen so the launched game window is visible on top.
+            ToggleFullscreen();
+
             // Fade-out transition (~0.5 s)
             for (int f = 0; f < 30; ++f) {
                 BeginDrawing();
@@ -268,6 +271,9 @@ int main(int argc, char** argv) {
             const auto result =
                 PlayOS::Runtime::LaunchAndWait(game.executable, game.args);
 
+            // Restore fullscreen after the game exits.
+            ToggleFullscreen();
+
             // Fade-in transition
             for (int f = 0; f < 20; ++f) {
                 BeginDrawing();
@@ -280,8 +286,6 @@ int main(int argc, char** argv) {
             } else {
                 status = game.title + " — exited. Back in shell.";
             }
-            // Clear status after a few seconds (handled by drawing loop —
-            // we just set it here).
         }
     }
 
