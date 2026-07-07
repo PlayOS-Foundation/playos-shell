@@ -114,9 +114,11 @@ int main(int argc, char** argv) {
         fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
 
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    const int W = GetMonitorWidth(0);
-    const int H = GetMonitorHeight(0);
-    InitWindow(W, H, "PlayOS Shell");
+    // W=0, H=0 with FLAG_FULLSCREEN_MODE tells Raylib to use the monitor's
+    // native resolution automatically.
+    InitWindow(0, 0, "PlayOS Shell");
+    const int W = GetScreenWidth();
+    const int H = GetScreenHeight();
     SetTargetFPS(60);
     HideCursor();
 
