@@ -75,25 +75,40 @@ std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
 }
 
 // ── input helpers ────────────────────────────────────────────────────────
+//
+// Try the PlayOS Platform API first (XInput / evdev), then fall back to
+// Raylib's built-in gamepad support. Raylib's GLFW layer handles gamepads
+// that aren't XInput-native (DualSense, Switch Pro, etc.), which is
+// essential on Windows where XInput only sees Xbox-compatible devices.
 
 bool PressedUp() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadUp) ||
-           IsKeyPressed(KEY_UP);
+           IsKeyPressed(KEY_UP) ||
+           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_UP);
 }
 bool PressedDown() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadDown) ||
-           IsKeyPressed(KEY_DOWN);
+           IsKeyPressed(KEY_DOWN) ||
+           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_DOWN);
 }
 bool PressedConfirm() {
     return PlayOS::Input::Pressed(PlayOS::Button::A) ||
-           IsKeyPressed(KEY_ENTER);
+           IsKeyPressed(KEY_ENTER) ||
+           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 }
 bool PressedBack() {
     return PlayOS::Input::Pressed(PlayOS::Button::B) ||
-           IsKeyPressed(KEY_ESCAPE);
+           IsKeyPressed(KEY_ESCAPE) ||
+           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT);
 }
 bool PressedHome() {
-    return PlayOS::Input::Pressed(PlayOS::Button::Home);
+    return PlayOS::Input::Pressed(PlayOS::Button::Home) ||
+           IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE);
+}
+
+bool ControllerConnected() {
+    return PlayOS::Input::ControllerConnected() ||
+           IsGamepadAvailable(0);
 }
 
 // ── animation helper ─────────────────────────────────────────────────────
@@ -174,7 +189,7 @@ int main(int argc, char** argv) {
         DrawText("PlayOS", 16, 8, 20, Color{180, 180, 200, 255});
 
         // Controller indicator
-        if (PlayOS::Input::ControllerConnected()) {
+        if (ControllerConnected()) {
             DrawCircle(W - 100, 18, 5, Color{60, 200, 80, 255});
             DrawText("Controller", W - 88, 8, 16, Color{140, 160, 150, 255});
         } else {
