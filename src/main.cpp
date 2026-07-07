@@ -29,24 +29,34 @@ struct GameEntry {
     std::vector<std::string> args;
 };
 
+// Platform executable name (adds .exe on Windows).
+std::string ExeName(const std::string& base) {
+#ifdef _WIN32
+    return base + ".exe";
+#else
+    return base;
+#endif
+}
+
 // Locates the hello-playos sample relative to the shell executable, using the
-// standard sibling repo layout:
-//   .../playos-shell/build/playos-shell.exe
-//   .../playos-samples/build/hello-playos.exe
-// Returns an empty string if not found.
+// standard sibling repo layout and trying the build directory names used on
+// Windows (build) and Linux (build-linux). Returns empty if not found.
 std::string FindSampleGame(const fs::path& exeDir) {
-    const fs::path candidate =
-        exeDir / ".." / ".." / "playos-samples" / "build" / "hello-playos.exe";
-    std::error_code ec;
-    const fs::path resolved = fs::weakly_canonical(candidate, ec);
-    if (!ec && fs::exists(resolved)) {
-        return resolved.string();
+    const std::string exe = ExeName("hello-playos");
+    for (const char* buildDir : {"build", "build-linux"}) {
+        const fs::path candidate =
+            exeDir / ".." / ".." / "playos-samples" / buildDir / exe;
+        std::error_code ec;
+        const fs::path resolved = fs::weakly_canonical(candidate, ec);
+        if (!ec && fs::exists(resolved)) {
+            return resolved.string();
+        }
     }
     return {};
 }
 
 // Demo library for the slice. The hello-playos sample is listed first when it
-// can be found; the remaining entries are real Windows programs so the
+// can be found; the remaining entries are platform-appropriate programs so the
 // launch/return loop can be proven even without the sample built.
 std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
     std::vector<GameEntry> games;
@@ -54,10 +64,14 @@ std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
     if (!sample.empty()) {
         games.push_back({"Hello PlayOS (sample)", sample, {}});
     }
+#ifdef _WIN32
     games.push_back(
         {"Demo App (Notepad)", "C:\\Windows\\System32\\notepad.exe", {}});
     games.push_back({"Terminal Echo", "C:\\Windows\\System32\\cmd.exe",
                      {"/c", "echo PlayOS launched me && pause"}});
+#else
+    games.push_back({"Demo (sleep 1s)", "/bin/sh", {"-c", "sleep 1"}});
+#endif
     return games;
 }
 
