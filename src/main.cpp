@@ -174,9 +174,7 @@ int main(int argc, char** argv) {
         DrawText("PlayOS", 16, 8, 20, Color{180, 180, 200, 255});
 
         // Controller indicator
-        const bool controllerConnected =
-            PlayOS::Capabilities::Has(PlayOS::Capability::InputBasic);
-        if (controllerConnected) {
+        if (PlayOS::Input::ControllerConnected()) {
             DrawCircle(W - 100, 18, 5, Color{60, 200, 80, 255});
             DrawText("Controller", W - 88, 8, 16, Color{140, 160, 150, 255});
         } else {
