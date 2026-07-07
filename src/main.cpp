@@ -15,10 +15,13 @@
 #include "playos/playos.h"
 #include "playos/runtime/process.h"
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
 namespace {
+
+namespace fs = std::filesystem;
 
 struct GameEntry {
     std::string title;
@@ -26,15 +29,36 @@ struct GameEntry {
     std::vector<std::string> args;
 };
 
-// Demo library for the slice. These are real Windows programs so we can prove
-// launch + return-to-shell end to end. On a device these become PlayOS
-// packages resolved by the runtime.
-std::vector<GameEntry> DemoLibrary() {
-    return {
-        {"Demo App (Notepad)", "C:\\Windows\\System32\\notepad.exe", {}},
-        {"Terminal Echo", "C:\\Windows\\System32\\cmd.exe",
-         {"/c", "echo PlayOS launched me && pause"}},
-    };
+// Locates the hello-playos sample relative to the shell executable, using the
+// standard sibling repo layout:
+//   .../playos-shell/build/playos-shell.exe
+//   .../playos-samples/build/hello-playos.exe
+// Returns an empty string if not found.
+std::string FindSampleGame(const fs::path& exeDir) {
+    const fs::path candidate =
+        exeDir / ".." / ".." / "playos-samples" / "build" / "hello-playos.exe";
+    std::error_code ec;
+    const fs::path resolved = fs::weakly_canonical(candidate, ec);
+    if (!ec && fs::exists(resolved)) {
+        return resolved.string();
+    }
+    return {};
+}
+
+// Demo library for the slice. The hello-playos sample is listed first when it
+// can be found; the remaining entries are real Windows programs so the
+// launch/return loop can be proven even without the sample built.
+std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
+    std::vector<GameEntry> games;
+    const std::string sample = FindSampleGame(exeDir);
+    if (!sample.empty()) {
+        games.push_back({"Hello PlayOS (sample)", sample, {}});
+    }
+    games.push_back(
+        {"Demo App (Notepad)", "C:\\Windows\\System32\\notepad.exe", {}});
+    games.push_back({"Terminal Echo", "C:\\Windows\\System32\\cmd.exe",
+                     {"/c", "echo PlayOS launched me && pause"}});
+    return games;
 }
 
 // Returns true if the user pressed "up" this frame (controller or keyboard).
@@ -62,7 +86,10 @@ bool PressedBack() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const fs::path exeDir =
+        fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
+
     const int screenWidth = 1280;
     const int screenHeight = 720;
 
@@ -71,7 +98,7 @@ int main() {
 
     PlayOS::Lifecycle::Init();
 
-    const auto library = DemoLibrary();
+    const auto library = DemoLibrary(exeDir);
     int selected = 0;
     std::string status = "Ready. A = launch, B = quit.";
 
