@@ -104,8 +104,12 @@ int main(int argc, char** argv) {
     const fs::path exeDir =
         fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
 
-    const int screenWidth = 1280;
-    const int screenHeight = 720;
+    // Console experience: fullscreen borderless at the monitor's native
+    // resolution. On a runtime device the compositor handles fullscreening;
+    // on SDK targets the shell requests it directly.
+    SetConfigFlags(FLAG_FULLSCREEN_MODE);
+    const int screenWidth = GetMonitorWidth(0);
+    const int screenHeight = GetMonitorHeight(0);
 
     InitWindow(screenWidth, screenHeight, "PlayOS Shell");
     SetTargetFPS(60);
