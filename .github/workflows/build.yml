@@ -11,6 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configure git for cross-repo access
+        run: |
+          git config --global url."https://oauth2:${{ secrets.GITHUB_TOKEN }}@github.com".insteadOf "https://github.com"
+
       - name: Install build tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
