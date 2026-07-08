@@ -50,6 +50,8 @@ target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
     PlayOS::playos-input-raylib
     PlayOS::playos-display-raylib
+    PlayOS::playos-audio-raylib
+    PlayOS::playos-touch-raylib
     PlayOS::Runtime
     raylib)
 if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
