@@ -18,6 +18,13 @@
 #include <string>
 #include <vector>
 
+#ifdef __linux__
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <cstring>
+#include <net/if.h>
+#endif
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -113,6 +120,39 @@ bool PressedHome() {
 float Track(float value, float target, float speed, float dt) {
     if (fabsf(target - value) < 0.5f) return target;
     return value + (target - value) * std::min(speed * dt, 1.0f);
+}
+
+// ── network helpers ──────────────────────────────────────────────────────
+
+// Returns the primary non-loopback IPv4 address, or empty string if none.
+// Cached after first call — IP rarely changes while the shell is running.
+std::string GetPrimaryIP() {
+    static std::string cached;
+    static bool tried = false;
+    if (tried) return cached;
+    tried = true;
+
+#ifdef __linux__
+    struct ifaddrs *ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0) return "";
+
+    for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+        // Skip loopback
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+        // Skip interfaces that are down
+        if (!(ifa->ifa_flags & IFF_UP)) continue;
+
+        char ip[INET_ADDRSTRLEN];
+        void *addr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
+        inet_ntop(AF_INET, addr, ip, sizeof(ip));
+        cached = ip;
+        break;
+    }
+    freeifaddrs(ifaddr);
+#endif
+    return cached;
 }
 
 } // namespace
@@ -250,6 +290,16 @@ int main(int argc, char** argv) {
         }
         DrawText("Navigate: D-Pad /   Launch: A   —   Home: overlay",
                  80, H - 42, 16, Color{80, 80, 100, 255});
+
+        // ── IP address (bottom-right) ───────────────────────────────────
+
+        const std::string ip = GetPrimaryIP();
+        if (!ip.empty()) {
+            const char *label = TextFormat("IP: %s", ip.c_str());
+            const int labelW = MeasureText(label, 16);
+            DrawText(label, W - labelW - 20, H - 68, 16,
+                     Color{100, 180, 100, 255});
+        }
 
         // ── overlay ──────────────────────────────────────────────────────
 
