@@ -43,6 +43,11 @@ struct GameEntry {
 
 std::string FindSampleGame(const fs::path& exeDir) {
     const std::string exe = ExeName("hello-playos");
+    return FindSample(exeDir, exe);
+}
+
+std::string FindSample(const fs::path& exeDir, const std::string& name) {
+    const std::string exe = ExeName(name);
     for (const char* buildDir : {"build", "build-linux"}) {
         const fs::path candidate =
             exeDir / ".." / ".." / "playos-samples" / buildDir / exe;
@@ -55,11 +60,17 @@ std::string FindSampleGame(const fs::path& exeDir) {
 
 std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
     std::vector<GameEntry> games;
-    const std::string sample = FindSampleGame(exeDir);
+    const std::string sample = FindSample(exeDir, "hello-playos");
     if (!sample.empty()) {
         games.push_back({"Hello PlayOS",
                          "The reference sample — Raylib + Platform API",
                          sample, {}});
+    }
+    const std::string invaders = FindSample(exeDir, "space-invaders");
+    if (!invaders.empty()) {
+        games.push_back({"Space Invaders",
+                         "Classic arcade shooter — defend Earth!",
+                         invaders, {}});
     }
 #ifdef _WIN32
     games.push_back({"Notepad", "Windows text editor (demo)",
