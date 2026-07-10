@@ -221,28 +221,28 @@ int main(int argc, char** argv) {
         ClearBackground(Color{12, 12, 18, 255});
 
         // Status bar
-        DrawRectangle(0, 0, W, 36, Color{8, 8, 14, 180});
-        DrawText("PlayOS", 16, 8, 20, Color{180, 180, 200, 255});
+        DrawRectangle(0, 0, W, 72, Color{8, 8, 14, 180});
+        DrawText("PlayOS", 32, 16, 40, Color{180, 180, 200, 255});
 
         // Controller indicator
         if (PlayOS::Input::ControllerConnected()) {
-            DrawCircle(W - 100, 18, 5, Color{60, 200, 80, 255});
-            DrawText("Controller", W - 88, 8, 16, Color{140, 160, 150, 255});
+            DrawCircle(W - 200, 36, 10, Color{60, 200, 80, 255});
+            DrawText("Controller", W - 176, 16, 32, Color{140, 160, 150, 255});
         } else {
-            DrawText("No controller", W - 130, 8, 16,
+            DrawText("No controller", W - 260, 16, 32,
                      Color{100, 100, 110, 255});
         }
 
         // Category heading
-        DrawText("LIBRARY", 80, 72, 14, Color{100, 100, 140, 255});
+        DrawText("LIBRARY", 160, 144, 28, Color{100, 100, 140, 255});
 
         // ── game list ────────────────────────────────────────────────────
 
-        constexpr int kRowH = 72;
-        constexpr int kListTop = 106;
+        constexpr int kRowH = 144;
+        constexpr int kListTop = 212;
         constexpr int kListLeft = 64;
-        constexpr int kListW = 860;
-        constexpr int kIconSz = 52;
+        constexpr int kListW = 1720;
+        constexpr int kIconSz = 104;
 
         for (int i = 0; i < (int)library.size(); ++i) {
             const int y = kListTop + i * kRowH;
@@ -258,19 +258,19 @@ int main(int argc, char** argv) {
 
             // Icon placeholder
             DrawRectangleRounded(
-                Rectangle{(float)kListLeft + 12, (float)y + 10, (float)kIconSz,
+                Rectangle{(float)kListLeft + 24, (float)y + 20, (float)kIconSz,
                           (float)kIconSz},
                 0.2f, 6,
                 isSel ? Color{64, 130, 220, 255} : Color{32, 34, 44, 255});
 
             // Title
-            DrawText(library[i].title.c_str(), kListLeft + kIconSz + 24,
-                     y + 10, 26,
+            DrawText(library[i].title.c_str(), kListLeft + kIconSz + 48,
+                     y + 20, 52,
                      isSel ? RAYWHITE : Color{200, 200, 210, 255});
 
             // Subtitle
-            DrawText(library[i].subtitle.c_str(), kListLeft + kIconSz + 24,
-                     y + 42, 16, Color{120, 120, 140, 255});
+            DrawText(library[i].subtitle.c_str(), kListLeft + kIconSz + 48,
+                     y + 84, 32, Color{120, 120, 140, 255});
         }
 
         // Scrollbar hint
@@ -285,19 +285,19 @@ int main(int argc, char** argv) {
         // ── status / help line ───────────────────────────────────────────
 
         if (!status.empty()) {
-            DrawText(status.c_str(), 80, H - 72, 18,
+            DrawText(status.c_str(), 160, H - 144, 36,
                      Color{130, 150, 130, 255});
         }
         DrawText("Navigate: D-Pad /   Launch: A   —   Home: overlay",
-                 80, H - 42, 16, Color{80, 80, 100, 255});
+                 160, H - 84, 32, Color{80, 80, 100, 255});
 
         // ── IP address (bottom-right) ───────────────────────────────────
 
         const std::string ip = GetPrimaryIP();
         if (!ip.empty()) {
             const char *label = TextFormat("IP: %s", ip.c_str());
-            const int labelW = MeasureText(label, 16);
-            DrawText(label, W - labelW - 20, H - 68, 16,
+            const int labelW = MeasureText(label, 32);
+            DrawText(label, W - labelW - 40, H - 136, 32,
                      Color{100, 180, 100, 255});
         }
 
@@ -308,20 +308,20 @@ int main(int argc, char** argv) {
             DrawRectangle(0, 0, W, H, Color{0, 0, 0, 160});
 
             const char* overlayTitle = "SYSTEM";
-            const int titleW = MeasureText(overlayTitle, 32);
-            DrawText(overlayTitle, (W - titleW) / 2, H / 2 - 80, 32,
+            const int titleW = MeasureText(overlayTitle, 64);
+            DrawText(overlayTitle, (W - titleW) / 2, H / 2 - 160, 64,
                      Color{180, 180, 200, 255});
 
-            DrawText("Press B or Home to close", (W - 240) / 2, H / 2 + 40,
-                     22, Color{140, 140, 160, 255});
+            DrawText("Press B or Home to close", (W - 480) / 2, H / 2 + 80,
+                     44, Color{140, 140, 160, 255});
 
             // Storage info (proves storage backend is wired)
             const char* savePath = PlayOS::Storage::SavePath();
             const char* cfgPath  = PlayOS::Storage::ConfigPath();
             DrawText(TextFormat("Saves: %s", savePath),
-                     40, H - 80, 14, Color{100, 100, 130, 255});
+                     80, H - 160, 28, Color{100, 100, 130, 255});
             DrawText(TextFormat("Config: %s", cfgPath),
-                     40, H - 58, 14, Color{100, 100, 130, 255});
+                     80, H - 116, 28, Color{100, 100, 130, 255});
         }
 
         EndDrawing();
