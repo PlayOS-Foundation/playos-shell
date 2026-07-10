@@ -41,11 +41,6 @@ struct GameEntry {
     std::vector<std::string> args;
 };
 
-std::string FindSampleGame(const fs::path& exeDir) {
-    const std::string exe = ExeName("hello-playos");
-    return FindSample(exeDir, exe);
-}
-
 std::string FindSample(const fs::path& exeDir, const std::string& name) {
     const std::string exe = ExeName(name);
     for (const char* buildDir : {"build", "build-linux"}) {
