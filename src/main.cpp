@@ -13,17 +13,10 @@
 #include "playos/runtime/process.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#ifdef __linux__
-#include <arpa/inet.h>
-#include <ifaddrs.h>
-#include <cstring>
-#include <dirent.h>
-#include <net/if.h>
-#endif
 
 namespace {
 
@@ -63,35 +56,23 @@ std::string FindSample(const fs::path& exeDir, const std::string& name) {
 std::vector<GameEntry> DemoLibrary(const fs::path& exeDir) {
     std::vector<GameEntry> games;
     const std::string sample = FindSample(exeDir, "hello-playos");
-    if (!sample.empty()) {
+    if (!sample.empty())
         games.push_back({"Hello PlayOS",
                          "The reference sample — Raylib + Platform API",
                          sample, {}});
-    }
     const std::string invaders = FindSample(exeDir, "space-invaders");
-    if (!invaders.empty()) {
+    if (!invaders.empty())
         games.push_back({"Space Invaders",
                          "Classic arcade shooter — defend Earth!",
                          invaders, {}});
-    }
-#ifdef _WIN32
-    games.push_back({"Notepad", "Windows text editor (demo)",
-                     "C:\\Windows\\System32\\notepad.exe", {}});
-    games.push_back({"Terminal Echo", "Prints a message and waits",
-                     "C:\\Windows\\System32\\cmd.exe",
-                     {"/c", "echo PlayOS launched me && pause"}});
-#else
-    games.push_back({"Sleep Demo", "Sleeps 1 second and returns",
-                     "/bin/sh", {"-c", "sleep 1"}});
-#endif
+    // Dev-only entries — only shown when no real samples found
+    if (games.empty())
+        games.push_back({"Sleep Demo", "Sleeps 1 second and returns",
+                         "/bin/sh", {"-c", "sleep 1"}});
     return games;
 }
 
 // ── input helpers ────────────────────────────────────────────────────────
-//
-// All input goes through the PlayOS Platform API. The linked input backend
-// (playos-input-raylib for the PoC) handles gamepad mapping and keyboard
-// fallback.
 
 bool PressedUp() {
     return PlayOS::Input::Pressed(PlayOS::Button::DPadUp) ||
@@ -115,85 +96,10 @@ bool PressedHome() {
 
 // ── animation helper ─────────────────────────────────────────────────────
 
-// Smoothly moves `value` toward `target` at `speed` units/sec. Call each
-// frame with GetFrameTime().
 float Track(float value, float target, float speed, float dt) {
     if (fabsf(target - value) < 0.5f) return target;
     return value + (target - value) * std::min(speed * dt, 1.0f);
 }
-
-// ── network helpers ──────────────────────────────────────────────────────
-
-// Returns the primary non-loopback IPv4 address, or empty string if none.
-// Cached after first call — IP rarely changes while the shell is running.
-std::string GetPrimaryIP() {
-    static std::string cached;
-    static bool tried = false;
-    if (tried) return cached;
-    tried = true;
-
-#ifdef __linux__
-    struct ifaddrs *ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != 0) return "";
-
-    for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == nullptr) continue;
-        if (ifa->ifa_addr->sa_family != AF_INET) continue;
-        // Skip loopback
-        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
-        // Skip interfaces that are down
-        if (!(ifa->ifa_flags & IFF_UP)) continue;
-
-        char ip[INET_ADDRSTRLEN];
-        void *addr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
-        inet_ntop(AF_INET, addr, ip, sizeof(ip));
-        cached = ip;
-        break;
-    }
-    freeifaddrs(ifaddr);
-#endif
-    return cached;
-}
-
-// ── connectivity helpers ─────────────────────────────────────────────────
-
-// WiFi state: checks for a wireless interface (name starts with 'wl') that
-// is UP. Returns 2 = connected (has IP), 1 = up but no IP, 0 = no wifi.
-#ifdef __linux__
-static int WifiState() {
-    struct ifaddrs *ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != 0) return 0;
-    int best = 0;
-    for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        // Wireless interfaces start with 'wl' (wlan0, wlp3s0, etc.)
-        if (strncmp(ifa->ifa_name, "wl", 2) != 0) continue;
-        if (!(ifa->ifa_flags & IFF_UP)) continue;
-        if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET) {
-            best = 2; // connected with IP
-            break;
-        }
-        if (best < 1) best = 1; // interface up, no IP yet
-    }
-    freeifaddrs(ifaddr);
-    return best;
-}
-
-// Bluetooth state: returns true if any BT host controller is present in sysfs.
-static bool BluetoothPresent() {
-    DIR *d = opendir("/sys/class/bluetooth");
-    if (!d) return false;
-    struct dirent *ent;
-    bool found = false;
-    while ((ent = readdir(d)) != nullptr) {
-        if (ent->d_name[0] != '.') { found = true; break; }
-    }
-    closedir(d);
-    return found;
-}
-#else
-static int WifiState() { return 0; }
-static bool BluetoothPresent() { return false; }
-#endif
 
 } // namespace
 
@@ -203,20 +109,21 @@ int main(int argc, char** argv) {
     const fs::path exeDir =
         fs::absolute(fs::path(argc > 0 ? argv[0] : "")).parent_path();
 
-    // Fullscreen on Linux (console experience), windowed on Windows
-    // (convenient for development). On a runtime device the compositor
-    // fullscreens every Wayland client surface regardless.
+    // Use fullscreen on runtime devices; set PLAYOS_WINDOWED=1 for dev.
+    // Use fullscreen on runtime devices; set PLAYOS_WINDOWED=1 for dev.
+    // The PlayOS compositor enforces fullscreen via Wayland regardless.
+    const bool windowed = (std::getenv("PLAYOS_WINDOWED") != nullptr);
     auto displayInfo = PlayOS::Display::Current();
-#ifdef __linux__
-    SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    InitWindow(0, 0, "PlayOS Shell");
+    if (!windowed) {
+        SetConfigFlags(FLAG_FULLSCREEN_MODE);
+        InitWindow(0, 0, "PlayOS Shell");
+    } else {
+        const int W0 = displayInfo.width  > 0 ? displayInfo.width  : 1280;
+        const int H0 = displayInfo.height > 0 ? displayInfo.height : 720;
+        InitWindow(W0, H0, "PlayOS Shell");
+    }
     const int W = GetScreenWidth();
     const int H = GetScreenHeight();
-#else
-    const int W = displayInfo.width > 0 ? displayInfo.width : 1280;
-    const int H = displayInfo.height > 0 ? displayInfo.height : 720;
-    InitWindow(W, H, "PlayOS Shell");
-#endif
     SetTargetFPS(displayInfo.refreshRate > 0 ? displayInfo.refreshRate : 60);
     HideCursor();
 
@@ -375,9 +282,9 @@ int main(int argc, char** argv) {
 
         // ── IP address (bottom-right) ───────────────────────────────────
 
-        const std::string ip = GetPrimaryIP();
-        if (!ip.empty()) {
-            const char *label = TextFormat("IP: %s", ip.c_str());
+        const char* ip = PlayOS::Network::PrimaryIP();
+        if (ip && ip[0] != '\0') {
+            const char *label = TextFormat("IP: %s", ip);
             const int labelW = MeasureText(label, 32);
             DrawText(label, W - labelW - 40, H - 136, 32,
                      Color{100, 180, 100, 255});
@@ -389,8 +296,9 @@ int main(int argc, char** argv) {
             const int indY  = H - 200;
             int xCursor = W - 40;
 
-            // Bluetooth
-            const bool btPresent = BluetoothPresent();
+            // Bluetooth — via Platform API
+            const bool btPresent = PlayOS::Capabilities::Has(
+                PlayOS::Capability::BluetoothPresent);
             Color btCol = btPresent ? Color{100, 160, 255, 255} : Color{60, 60, 80, 255};
             if (hasIcons) {
                 Vector2 sz = MeasureTextEx(iconFont, kIcoBT, indSz, 0);
@@ -401,11 +309,13 @@ int main(int argc, char** argv) {
                 DrawText("B", xCursor, indY, indSz, btCol);
             }
 
-            // WiFi
-            const int wifiState = WifiState();
-            Color wfCol = wifiState == 2 ? Color{80, 200, 80, 255}
-                        : wifiState == 1 ? Color{220, 180, 40, 255}
-                                         : Color{60, 60, 80, 255};
+            // WiFi — via Platform API
+            const auto wifiState = PlayOS::Network::GetWiFiState();
+            Color wfCol = wifiState == PlayOS::Network::WiFiState::Connected
+                            ? Color{80, 200,  80, 255}
+                        : wifiState == PlayOS::Network::WiFiState::Connecting
+                            ? Color{220, 180, 40, 255}
+                            : Color{60,  60,  80, 255};
             if (hasIcons) {
                 Vector2 sz = MeasureTextEx(iconFont, kIcoWifi, indSz, 0);
                 xCursor -= (int)sz.x + 16;
@@ -446,11 +356,6 @@ int main(int argc, char** argv) {
         if (launchRequested) {
             const auto& game = library[selected];
 
-#ifdef __linux__
-            // Exit fullscreen so the launched game window is visible on top.
-            ToggleFullscreen();
-#endif
-
             // Fade-out transition (~0.5 s)
             for (int f = 0; f < 30; ++f) {
                 BeginDrawing();
@@ -463,11 +368,6 @@ int main(int argc, char** argv) {
 
             const auto result =
                 PlayOS::Runtime::LaunchAndWait(game.executable, game.args);
-
-#ifdef __linux__
-            // Restore fullscreen after the game exits.
-            ToggleFullscreen();
-#endif
 
             // Fade-in transition
             for (int f = 0; f < 20; ++f) {
