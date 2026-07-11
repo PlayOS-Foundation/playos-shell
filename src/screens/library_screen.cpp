@@ -22,7 +22,7 @@ static bool PressedConfirm() {
     return PlayOS::Input::Pressed(PlayOS::Button::A)        || IsKeyPressed(KEY_ENTER);
 }
 static bool PressedHome() {
-    return PlayOS::Input::Pressed(PlayOS::Button::Home);
+    return PlayOS::Input::Pressed(PlayOS::Button::Home) || IsKeyPressed(KEY_H);
 }
 
 static std::string ExeName(const std::string& base) {
