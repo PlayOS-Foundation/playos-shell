@@ -64,6 +64,15 @@ OS-specific code in the shell itself.
 - [ ] `DisplayScreen` — brightness (when `Capability::Brightness` present)
 - [ ] `PowerScreen` — sleep / shutdown / restart
 
+### Installer
+- [ ] `InstallerScreen` — "Install PlayOS to Disk" with disk detection + confirmation
+  - Auto-detects internal disk (nvme0n1 / sda)
+  - Confirmation prompt: "This will ERASE ALL DATA. Continue?"
+  - Spawns `playos-installer.service` which stops compositor, partitions, copies rootfs, installs bootloader, reboots
+  - Accessible via Home → Install to Disk
+- [ ] `/usr/bin/playos-install` — shell script: GPT partition (ESP + root), rsync live system, systemd-boot, fstab
+- [ ] `playos-installer.service` — oneshot systemd unit that runs the installer on console
+
 ---
 
 ## 📋 Planned — Phase 3 (Marketplace)

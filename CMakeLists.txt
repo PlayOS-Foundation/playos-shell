@@ -54,6 +54,7 @@ add_executable(playos-shell
     src/screens/library_screen.cpp
     src/screens/overlay_screen.cpp
     src/screens/wifi_screen.cpp
+    src/screens/installer_screen.cpp
 )
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI

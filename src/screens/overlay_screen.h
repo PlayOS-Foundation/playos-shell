@@ -19,8 +19,9 @@ private:
 
     struct MenuItem { const char* label; const char* hint; };
     static constexpr MenuItem kItems[] = {
-        { "WiFi Settings",  "Configure wireless networks" },
-        { "Close",          "Return to previous screen"   },
+        { "WiFi Settings",     "Configure wireless networks"         },
+        { "Install to Disk",   "Install PlayOS to the internal disk" },
+        { "Close",             "Return to previous screen"           },
     };
-    static constexpr int kItemCount = 2;
+    static constexpr int kItemCount = 3;
 };

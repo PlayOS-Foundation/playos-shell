@@ -1,5 +1,6 @@
 #include "overlay_screen.h"
 #include "wifi_screen.h"
+#include "installer_screen.h"
 
 #include "raylib.h"
 #include "playos/playos.h"
@@ -23,7 +24,8 @@ void OverlayScreen::Update(float dt) {
     if (OvConfirm()) {
         switch (m_selected) {
         case 0: m_stack.Push(std::make_unique<WiFiScreen>(m_stack)); break;
-        case 1: m_stack.Pop(); break;
+        case 1: m_stack.Push(std::make_unique<InstallerScreen>(m_stack)); break;
+        case 2: m_stack.Pop(); break;
         }
     }
 }
