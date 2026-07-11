@@ -222,6 +222,42 @@ int main(int argc, char** argv) {
 
     PlayOS::Lifecycle::Init();
 
+    // ── Remixicon icon font (optional — falls back to letters if file absent) ──
+    // Codepoints: wifi=U+F2C0  bluetooth=U+EACC  battery=U+EAB0
+    //             battery-charge=U+EAAE  battery-low=U+EAB2
+    static const int kIconCPs[] = { 0xF2C0, 0xEACC, 0xEAB0, 0xEAAE, 0xEAB2 };
+    Font iconFont = {};
+    const char* iconFontPath = "/usr/share/playos/fonts/remixicon.ttf";
+    if (FileExists(iconFontPath)) {
+        iconFont = LoadFontEx(iconFontPath, 52,
+                              const_cast<int*>(kIconCPs), 5);
+    }
+    const bool hasIcons = (iconFont.baseSize > 0);
+    // UTF-8 encodings of the codepoints above
+    const char* kIcoWifi   = "\xEF\x8B\x80"; // U+F2C0 wifi-line
+    const char* kIcoBT     = "\xEA\xB3\x8C"; // U+EACC bluetooth-line
+    const char* kIcoBatt   = "\xEA\xAA\xB0"; // U+EAB0 battery-line
+    const char* kIcoBattCh = "\xEA\xAA\xAE"; // U+EAAE battery-charge-line
+    const char* kIcoBattLo = "\xEA\xAA\xB2"; // U+EAB2 battery-low-line
+
+    // ── Load Remixicon icon font ────────────────────────────────────────────
+    // Codepoints we use (remixicon-line variants):
+    //   wifi          U+F2C0 \xEF\x8B\x80   signal-wifi  U+F134 \xEF\x84\xB4
+    //   bluetooth     U+EACC \xEA\xB3\x8C   bt-connect   U+EACA \xEA\xB2\x8A
+    //   battery       U+EAB0 \xEA\xAA\xB0   battery-chg  U+EAAE \xEA\xAA\xAE
+    //   battery-low   U+EAB2 \xEA\xAA\xB2   gamepad      U+EDAB \xED\xB6\xAB
+    static const int kIconCPs[] = {
+        0xF2C0, 0xF134, 0xEACC, 0xEACA, 0xEAB0, 0xEAAE, 0xEAB2, 0xEDAB };
+    constexpr int kIconCPCount = (int)(sizeof(kIconCPs)/sizeof(kIconCPs[0]));
+    constexpr int kIconSzFont  = 48;
+    Font iconFont = {};
+    const char* iconFontPath = "/usr/share/playos/fonts/remixicon.ttf";
+    if (FileExists(iconFontPath)) {
+        iconFont = LoadFontEx(iconFontPath, kIconSzFont,
+                              const_cast<int*>(kIconCPs), kIconCPCount);
+    }
+    const bool hasIcons = (iconFont.baseSize > 0);
+
     const auto library = DemoLibrary(exeDir);
     int selected = 0;
     std::string status;
@@ -273,7 +309,7 @@ int main(int argc, char** argv) {
                      Color{100, 100, 110, 255});
         }
 
-        // Battery indicator (top-right, only when capability present)
+        // Battery indicator (top-right)
         if (PlayOS::Capabilities::Has(PlayOS::Capability::Battery)) {
             const float batt = PlayOS::Battery::Level();
             const bool charging = PlayOS::Battery::IsCharging();
@@ -282,11 +318,20 @@ int main(int argc, char** argv) {
                 Color battCol = batt > 0.3f ? Color{80, 200, 80, 255}
                               : batt > 0.1f ? Color{220, 180, 40, 255}
                                             : Color{220, 60, 60, 255};
-                const char* battLabel = charging
-                    ? TextFormat("~%d%%", pct)
-                    : TextFormat("%d%%", pct);
-                const int bw = MeasureText(battLabel, 28);
-                DrawText(battLabel, W - bw - 20, H - 56, 28, battCol);
+                const char* pctStr = TextFormat("%d%%", pct);
+                const int pctW = MeasureText(pctStr, 28);
+                if (hasIcons) {
+                    const char* ico = charging ? kIcoBattCh
+                                    : batt < 0.2f ? kIcoBattLo : kIcoBatt;
+                    Vector2 isz = MeasureTextEx(iconFont, ico, 44, 0);
+                    int rx = W - (int)isz.x - pctW - 52;
+                    DrawTextEx(iconFont, ico, {(float)rx, (float)(H-148)}, 44, 0, battCol);
+                    DrawText(pctStr, W - pctW - 40, H - 142, 28, battCol);
+                } else {
+                    const char* lbl = charging ? TextFormat("~%d%%", pct) : pctStr;
+                    const int bw = MeasureText(lbl, 28);
+                    DrawText(lbl, W - bw - 40, H - 142, 28, battCol);
+                }
             }
         }
 
@@ -360,27 +405,35 @@ int main(int argc, char** argv) {
 
         // ── WiFi / Bluetooth indicators (bottom-right, above IP) ─────────
         {
-            const int indSz  = 36;
-            const int indY   = H - 196;
+            const int indSz = 48;
+            const int indY  = H - 200;
             int xCursor = W - 40;
 
-            // Battery (already rendered above, step cursor left past it)
-            // (battery draws itself using its own xCursor logic above)
-
-            // Bluetooth: B  — green if adapter present, dim if absent
+            // Bluetooth
             const bool btPresent = BluetoothPresent();
-            Color btCol = btPresent ? Color{100, 160, 255, 255}
-                                    : Color{60,  60,  80,  255};
-            xCursor -= MeasureText("B", indSz) + 16;
-            DrawText("B", xCursor, indY, indSz, btCol);
+            Color btCol = btPresent ? Color{100, 160, 255, 255} : Color{60, 60, 80, 255};
+            if (hasIcons) {
+                Vector2 sz = MeasureTextEx(iconFont, kIcoBT, indSz, 0);
+                xCursor -= (int)sz.x + 16;
+                DrawTextEx(iconFont, kIcoBT, {(float)xCursor, (float)indY}, indSz, 0, btCol);
+            } else {
+                xCursor -= MeasureText("B", indSz) + 16;
+                DrawText("B", xCursor, indY, indSz, btCol);
+            }
 
-            // WiFi: W — green=connected, yellow=up/no-ip, dim=absent
+            // WiFi
             const int wifiState = WifiState();
-            Color wfCol = wifiState == 2 ? Color{80,  200,  80, 255}
-                        : wifiState == 1 ? Color{220, 180,  40, 255}
-                                         : Color{60,   60,  80, 255};
-            xCursor -= MeasureText("W", indSz) + 16;
-            DrawText("W", xCursor, indY, indSz, wfCol);
+            Color wfCol = wifiState == 2 ? Color{80, 200, 80, 255}
+                        : wifiState == 1 ? Color{220, 180, 40, 255}
+                                         : Color{60, 60, 80, 255};
+            if (hasIcons) {
+                Vector2 sz = MeasureTextEx(iconFont, kIcoWifi, indSz, 0);
+                xCursor -= (int)sz.x + 16;
+                DrawTextEx(iconFont, kIcoWifi, {(float)xCursor, (float)indY}, indSz, 0, wfCol);
+            } else {
+                xCursor -= MeasureText("W", indSz) + 16;
+                DrawText("W", xCursor, indY, indSz, wfCol);
+            }
         }
 
         // ── overlay ──────────────────────────────────────────────────────
