@@ -34,6 +34,14 @@ OS-specific code in the shell itself.
 ### Architecture
 - [x] `PLAYOS_WINDOWED=1` env var for dev windowed mode
 - [x] Font loaded selectively (only codepoints needed)
+- [x] `SetExitKey(0)` — disable raylib default ESC→close (conflicts with overlay back)
+
+### Input handling fixes
+- [x] `H` key as keyboard fallback for Home button (opens overlay on VM/keyboard)
+- [x] Vendor button mappings in evdev backend: `BTN_TRIGGER_HAPPY1`–`HAPPY4`, `KEY_PROG1` → Home, `KEY_PROG2` → QuickSettings (ROG Ally, Steam Deck)
+- [x] Compositor modifier handler (`wlr_keyboard.events.modifiers`) — Shift/Ctrl forwarded to Wayland clients
+- [x] WiFi password entry: raw-key shift-aware fallback (US layout) when GLFW char callback doesn't fire
+- [x] WiFi password entry: prevent double characters (GetCharPressed + fallback both firing)
 
 ---
 
@@ -45,7 +53,10 @@ OS-specific code in the shell itself.
 - [x] `StatusBar` as a persistent component (polls every 5 s)
 - [x] `Icons` helper (load Remixicon once, draw by codepoint with fallback)
 - [x] `LibraryScreen` — game list, launch, fade transitions
-- [x] `OverlayScreen` — Home overlay (system info, back to dismiss)
+### Overlay menu
+- [x] WiFi Settings
+- [x] Install to Disk
+- [x] Close (ESC / B / Home to dismiss)
 - [x] `ShellApp` — owns window, loop, stack, status bar
 - [x] `main.cpp` reduced to 6 lines
 
@@ -65,13 +76,13 @@ OS-specific code in the shell itself.
 - [ ] `PowerScreen` — sleep / shutdown / restart
 
 ### Installer
-- [ ] `InstallerScreen` — "Install PlayOS to Disk" with disk detection + confirmation
+- [x] `InstallerScreen` — "Install PlayOS to Disk" with disk detection + confirmation
   - Auto-detects internal disk (nvme0n1 / sda)
   - Confirmation prompt: "This will ERASE ALL DATA. Continue?"
   - Spawns `playos-installer.service` which stops compositor, partitions, copies rootfs, installs bootloader, reboots
   - Accessible via Home → Install to Disk
-- [ ] `/usr/bin/playos-install` — shell script: GPT partition (ESP + root), rsync live system, systemd-boot, fstab
-- [ ] `playos-installer.service` — oneshot systemd unit that runs the installer on console
+- [x] `/usr/bin/playos-install` — shell script: GPT partition (ESP + root), rsync live system, systemd-boot, fstab
+- [x] `playos-installer.service` — oneshot systemd unit that runs the installer on console
 
 ---
 
