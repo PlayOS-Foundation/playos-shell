@@ -6,6 +6,7 @@
 
 #include "../screen.h"
 #include "../screen_stack.h"
+#include <string>
 
 class InstallerScreen : public IScreen {
 public:
