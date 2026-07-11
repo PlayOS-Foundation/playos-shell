@@ -37,15 +37,17 @@ OS-specific code in the shell itself.
 
 ---
 
-## 🔨 In Progress
+## ✅ In Progress → Done
 
 ### Shell refactor — Screen Stack
-- [ ] `IScreen` interface (`OnEnter`, `OnExit`, `Update`, `Draw`)
-- [ ] `ScreenStack` with push/pop and transitions
-- [ ] `StatusBar` as a persistent component (separate from screens)
-- [ ] `Icons` helper (load Remixicon once, draw by codepoint)
-- [ ] Move library + overlay into `LibraryScreen` / `OverlayScreen`
-- [ ] New `main.cpp` (~30 lines)
+- [x] `IScreen` interface (`OnEnter`, `OnExit`, `Update`, `Draw`)
+- [x] `ScreenStack` with push/pop
+- [x] `StatusBar` as a persistent component (polls every 5 s)
+- [x] `Icons` helper (load Remixicon once, draw by codepoint with fallback)
+- [x] `LibraryScreen` — game list, launch, fade transitions
+- [x] `OverlayScreen` — Home overlay (system info, back to dismiss)
+- [x] `ShellApp` — owns window, loop, stack, status bar
+- [x] `main.cpp` reduced to 6 lines
 
 ---
 
