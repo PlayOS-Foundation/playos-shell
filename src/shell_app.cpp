@@ -28,6 +28,7 @@ int ShellApp::Run(int argc, char** argv) {
     const int W = GetScreenWidth();
     const int H = GetScreenHeight();
     SetTargetFPS(displayInfo.refreshRate > 0 ? displayInfo.refreshRate : 60);
+    SetExitKey(0);   // disable default ESC→close; overlay handles ESC as "back"
     HideCursor();
 
     PlayOS::Lifecycle::Init();
