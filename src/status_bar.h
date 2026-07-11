@@ -13,6 +13,9 @@ public:
     // Call once per frame. Polls indicators every kPollIntervalSec seconds.
     void Update(float dt);
 
+    // Set the device name (from DeviceProfile) to show in the top bar.
+    void SetDeviceName(const std::string& name) { m_deviceName = name; }
+
     // Draw the status bar. Call after the active screen's Draw().
     void Draw(int W, int H) const;
 
@@ -21,6 +24,7 @@ private:
 
     const Icons& m_icons;
     float m_pollTimer = 0.0f;
+    std::string m_deviceName;
 
     // Cached indicator state (updated every kPollIntervalSec)
     bool        m_hasBattery    = false;

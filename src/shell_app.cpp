@@ -34,6 +34,17 @@ int ShellApp::Run(int argc, char** argv) {
     PlayOS::Lifecycle::Init();
     m_icons.Load();
 
+    // Load device profile (RFC-0006) — shows device name in status bar.
+    // Profile path from env var or default.
+    const char* profileId = std::getenv("PLAYOS_PROFILE");
+    std::string profilePath;
+    if (profileId && profileId[0])
+        profilePath = std::string("/etc/playos/device-profiles/") + profileId + ".toml";
+    else
+        profilePath = "/etc/playos/device-profiles/default.toml";
+    if (auto p = PlayOS::DeviceProfile::Load(profilePath))
+        m_statusBar.SetDeviceName(p->device().name);
+
     // Push the default screen
     m_stack.Push(std::make_unique<LibraryScreen>(exeDir, m_stack));
 

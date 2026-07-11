@@ -37,7 +37,14 @@ void StatusBar::Poll() {
 void StatusBar::Draw(int W, int H) const {
     // ── top bar ──────────────────────────────────────────────────────────
     DrawRectangle(0, 0, W, 72, Color{8, 8, 14, 180});
-    DrawText("PlayOS", 32, 16, 40, Color{180, 180, 200, 255});
+
+    // Device name from profile (e.g. "ASUS ROG Ally") next to "PlayOS"
+    if (!m_deviceName.empty()) {
+        DrawText(TextFormat("PlayOS  ·  %s", m_deviceName.c_str()),
+                 32, 16, 32, Color{180, 180, 200, 255});
+    } else {
+        DrawText("PlayOS", 32, 16, 40, Color{180, 180, 200, 255});
+    }
 
     if (m_controllerOn) {
         DrawCircle(W - 200, 36, 10, Color{60, 200, 80, 255});
