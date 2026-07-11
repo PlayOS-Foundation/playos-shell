@@ -49,11 +49,15 @@ add_executable(playos-shell src/main.cpp)
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
     PlayOS::playos-input-raylib
-    PlayOS::playos-display-raylib
     PlayOS::playos-audio-raylib
     PlayOS::playos-touch-raylib
     PlayOS::Runtime
     raylib)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(playos-shell PRIVATE PlayOS::playos-display-linux)
+else()
+    target_link_libraries(playos-shell PRIVATE PlayOS::playos-display-raylib)
+endif()
 if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_link_libraries(playos-shell PRIVATE PlayOS::playos-storage-windows)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
