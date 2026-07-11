@@ -6,6 +6,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 
 namespace fs = std::filesystem;
@@ -34,14 +35,35 @@ int ShellApp::Run(int argc, char** argv) {
     PlayOS::Lifecycle::Init();
     m_icons.Load();
 
-    // Load device profile (RFC-0006) — shows device name in status bar.
-    // Profile path from env var or default.
-    const char* profileId = std::getenv("PLAYOS_PROFILE");
+    // Load device profile (RFC-0006) — shows device name in status bar,
+    // enables profile-aware input mapping for vendor buttons.
+    //
+    // Detection order:
+    //   1. PLAYOS_PROFILE env var (e.g. "rog-ally")
+    //   2. /sys/class/dmi/id/product_name → match against profile dir
+    //   3. /etc/playos/device-profiles/default.toml
     std::string profilePath;
-    if (profileId && profileId[0])
+    const char* profileId = std::getenv("PLAYOS_PROFILE");
+    if (profileId && profileId[0]) {
         profilePath = std::string("/etc/playos/device-profiles/") + profileId + ".toml";
-    else
-        profilePath = "/etc/playos/device-profiles/default.toml";
+    } else {
+        // Auto-detect via DMI product name
+        std::ifstream dmi("/sys/class/dmi/id/product_name");
+        if (dmi.is_open()) {
+            std::string product;
+            std::getline(dmi, product);
+            // Map known DMI names → profile IDs
+            if (product.find("ROG Ally") != std::string::npos)
+                profilePath = "/etc/playos/device-profiles/rog-ally.toml";
+            else if (product.find("Steam Deck") != std::string::npos)
+                profilePath = "/etc/playos/device-profiles/steam-deck.toml";
+            else if (product.find("Legion Go") != std::string::npos)
+                profilePath = "/etc/playos/device-profiles/legion-go.toml";
+        }
+        // Fallback
+        if (profilePath.empty())
+            profilePath = "/etc/playos/device-profiles/default.toml";
+    }
     if (auto p = PlayOS::DeviceProfile::Load(profilePath))
         m_statusBar.SetDeviceName(p->device().name);
 
