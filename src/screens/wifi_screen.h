@@ -43,5 +43,6 @@ private:
     // Helpers
     void DoScan();
     void DoConnect();
+    void AppendTypedChar();
     void DrawSignalBars(int x, int y, int signal, bool active) const;
 };

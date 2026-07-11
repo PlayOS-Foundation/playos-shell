@@ -14,6 +14,56 @@ static bool NavConfirm() { return PlayOS::Input::Pressed(PlayOS::Button::A)     
 static bool NavBack()    { return PlayOS::Input::Pressed(PlayOS::Button::B)        || IsKeyPressed(KEY_ESCAPE); }
 static bool NavX()       { return PlayOS::Input::Pressed(PlayOS::Button::X)        || IsKeyPressed(KEY_R);      }
 
+// ── Typed-character helper (belt-and-suspenders for Wayland modifier handling) ──
+
+void WiFiScreen::AppendTypedChar() {
+    if (m_password.size() >= 63) return;
+
+    bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+    // Map key → char (lowercase) → shifted char (US keyboard layout)
+    struct Mapping { int key; char lo; char hi; };
+    static const Mapping map[] = {
+        // Letters
+        {KEY_A, 'a', 'A'}, {KEY_B, 'b', 'B'}, {KEY_C, 'c', 'C'},
+        {KEY_D, 'd', 'D'}, {KEY_E, 'e', 'E'}, {KEY_F, 'f', 'F'},
+        {KEY_G, 'g', 'G'}, {KEY_H, 'h', 'H'}, {KEY_I, 'i', 'I'},
+        {KEY_J, 'j', 'J'}, {KEY_K, 'k', 'K'}, {KEY_L, 'l', 'L'},
+        {KEY_M, 'm', 'M'}, {KEY_N, 'n', 'N'}, {KEY_O, 'o', 'O'},
+        {KEY_P, 'p', 'P'}, {KEY_Q, 'q', 'Q'}, {KEY_R, 'r', 'R'},
+        {KEY_S, 's', 'S'}, {KEY_T, 't', 'T'}, {KEY_U, 'u', 'U'},
+        {KEY_V, 'v', 'V'}, {KEY_W, 'w', 'W'}, {KEY_X, 'x', 'X'},
+        {KEY_Y, 'y', 'Y'}, {KEY_Z, 'z', 'Z'},
+        // Numbers
+        {KEY_ZERO,  '0', ')'}, {KEY_ONE,   '1', '!'},
+        {KEY_TWO,   '2', '@'}, {KEY_THREE, '3', '#'},
+        {KEY_FOUR,  '4', '$'}, {KEY_FIVE,  '5', '%'},
+        {KEY_SIX,   '6', '^'}, {KEY_SEVEN, '7', '&'},
+        {KEY_EIGHT, '8', '*'}, {KEY_NINE,  '9', '('},
+        // Punctuation
+        {KEY_SPACE,        ' ',  ' '},
+        {KEY_PERIOD,       '.',  '>'},
+        {KEY_COMMA,        ',',  '<'},
+        {KEY_SLASH,        '/',  '?'},
+        {KEY_SEMICOLON,    ';',  ':'},
+        {KEY_EQUAL,        '=',  '+'},
+        {KEY_MINUS,        '-',  '_'},
+        {KEY_APOSTROPHE,   '\'', '"'},
+        {KEY_LEFT_BRACKET, '[',  '{'},
+        {KEY_RIGHT_BRACKET,']',  '}'},
+        {KEY_BACKSLASH,    '\\', '|'},
+        {KEY_GRAVE,        '`',  '~'},
+    };
+
+    for (const auto& m : map) {
+        if (IsKeyPressed(m.key)) {
+            char c = shift ? m.hi : m.lo;
+            m_password += c;
+            return;  // one char per frame
+        }
+    }
+}
+
 // ── WiFiScreen ────────────────────────────────────────────────────────────
 
 WiFiScreen::WiFiScreen(ScreenStack& stack) : m_stack(stack) {}
@@ -57,12 +107,18 @@ void WiFiScreen::Update(float dt) {
     case State::EnterPass: {
         if (NavBack()) { m_state = State::List; return; }
 
-        // Read typed characters
+        // Read typed characters (GLFW char callback — works when compositor
+        // properly forwards xkb modifiers to the Wayland client).
         int ch;
         while ((ch = GetCharPressed()) > 0) {
             if (ch >= 32 && ch < 127 && m_password.size() < 63)
                 m_password += (char)ch;
         }
+
+        // Belt-and-suspenders: also detect common keys with Shift awareness
+        // in case the compositor or GLFW doesn't translate shifted chars.
+        AppendTypedChar();
+
         // Backspace
         if (IsKeyPressed(KEY_BACKSPACE) && !m_password.empty())
             m_password.pop_back();
