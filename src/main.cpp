@@ -21,6 +21,7 @@
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <cstring>
+#include <dirent.h>
 #include <net/if.h>
 #endif
 
@@ -153,6 +154,46 @@ std::string GetPrimaryIP() {
 #endif
     return cached;
 }
+
+// ── connectivity helpers ─────────────────────────────────────────────────
+
+// WiFi state: checks for a wireless interface (name starts with 'wl') that
+// is UP. Returns 2 = connected (has IP), 1 = up but no IP, 0 = no wifi.
+#ifdef __linux__
+static int WifiState() {
+    struct ifaddrs *ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0) return 0;
+    int best = 0;
+    for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        // Wireless interfaces start with 'wl' (wlan0, wlp3s0, etc.)
+        if (strncmp(ifa->ifa_name, "wl", 2) != 0) continue;
+        if (!(ifa->ifa_flags & IFF_UP)) continue;
+        if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET) {
+            best = 2; // connected with IP
+            break;
+        }
+        if (best < 1) best = 1; // interface up, no IP yet
+    }
+    freeifaddrs(ifaddr);
+    return best;
+}
+
+// Bluetooth state: returns true if any BT host controller is present in sysfs.
+static bool BluetoothPresent() {
+    DIR *d = opendir("/sys/class/bluetooth");
+    if (!d) return false;
+    struct dirent *ent;
+    bool found = false;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] != '.') { found = true; break; }
+    }
+    closedir(d);
+    return found;
+}
+#else
+static int WifiState() { return 0; }
+static bool BluetoothPresent() { return false; }
+#endif
 
 } // namespace
 
@@ -315,6 +356,31 @@ int main(int argc, char** argv) {
             const int labelW = MeasureText(label, 32);
             DrawText(label, W - labelW - 40, H - 136, 32,
                      Color{100, 180, 100, 255});
+        }
+
+        // ── WiFi / Bluetooth indicators (bottom-right, above IP) ─────────
+        {
+            const int indSz  = 36;
+            const int indY   = H - 196;
+            int xCursor = W - 40;
+
+            // Battery (already rendered above, step cursor left past it)
+            // (battery draws itself using its own xCursor logic above)
+
+            // Bluetooth: B  — green if adapter present, dim if absent
+            const bool btPresent = BluetoothPresent();
+            Color btCol = btPresent ? Color{100, 160, 255, 255}
+                                    : Color{60,  60,  80,  255};
+            xCursor -= MeasureText("B", indSz) + 16;
+            DrawText("B", xCursor, indY, indSz, btCol);
+
+            // WiFi: W — green=connected, yellow=up/no-ip, dim=absent
+            const int wifiState = WifiState();
+            Color wfCol = wifiState == 2 ? Color{80,  200,  80, 255}
+                        : wifiState == 1 ? Color{220, 180,  40, 255}
+                                         : Color{60,   60,  80, 255};
+            xCursor -= MeasureText("W", indSz) + 16;
+            DrawText("W", xCursor, indY, indSz, wfCol);
         }
 
         // ── overlay ──────────────────────────────────────────────────────
