@@ -15,4 +15,12 @@ public:
 
 private:
     ScreenStack& m_stack;
+    int m_selected = 0;
+
+    struct MenuItem { const char* label; const char* hint; };
+    static constexpr MenuItem kItems[] = {
+        { "WiFi Settings",  "Configure wireless networks" },
+        { "Close",          "Return to previous screen"   },
+    };
+    static constexpr int kItemCount = 2;
 };
