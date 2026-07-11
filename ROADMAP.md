@@ -55,12 +55,12 @@ OS-specific code in the shell itself.
 
 ### Configuration screen
 - [ ] `ConfigScreen` — hub for system settings
-- [ ] `WiFiScreen` — scan for networks, connect with password
-  - Uses `PlayOS::Network::GetWiFiState()` to show current status
-  - Triggers `nmcli` / NetworkManager via a runtime service call
+- [x] `WiFiScreen` — scan for networks, connect with keyboard password entry
+  - Uses `PlayOS::Network::ScanNetworks()` + `PlayOS::Network::Connect()`
+  - Signal strength bars, lock icon for secured networks
+  - Keyboard password entry with show/hide toggle (Tab)
+  - Accessible via Home → WiFi Settings
 - [ ] `BluetoothScreen` — scan for devices, pair controllers
-  - Uses `PlayOS::Bluetooth::IsPresent()`
-  - Triggers BlueZ scan via a runtime service call
 - [ ] `DisplayScreen` — brightness (when `Capability::Brightness` present)
 - [ ] `PowerScreen` — sleep / shutdown / restart
 
