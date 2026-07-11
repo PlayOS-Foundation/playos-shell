@@ -88,32 +88,18 @@ OS-specific code in the shell itself.
 
 ## 📋 Planned — Phase 2.5 (Device Profiles · RFC-0006)
 
-> **Goal:** Replace hardcoded evdev button mappings with runtime-loaded TOML
-> profiles, so new devices (Steam Deck, Legion Go, etc.) don't require
-> recompiling the platform API. Unblocks the ROG Ally Armoury button properly.
+> **Goal:** Shell loads device profile at startup for proper button mapping
+> and device identification. Implementation lives in `playos-platform-api`
+> and `playos-reference-devices`; the shell is a consumer.
 >
 > Spec: [`rfcs/0006-device-profile-format.md`](https://github.com/PlayOS-Foundation/playos-spec/blob/main/rfcs/0006-device-profile-format.md)
+>
+> See also: [`playos-platform-api/ROADMAP.md`](https://github.com/PlayOS-Foundation/playos-platform-api/blob/main/ROADMAP.md)
+> and [`playos-reference-devices/ROADMAP.md`](https://github.com/PlayOS-Foundation/playos-reference-devices/blob/main/ROADMAP.md)
 
-### Platform API (`playos-platform-api`)
-- [ ] TOML parser — integrate `tomlplusplus` (header-only, CMake FetchContent)
-- [ ] `DeviceProfile` class — load + validate `/etc/playos/device-profiles/<id>.toml`
-- [ ] `InputMapping` — symbolic button names → evdev key codes lookup table
-  - Vocabulary: `asus_armoury`, `asus_command_center`, `steamdeck_qam`, `xbox_guide`, etc.
-- [ ] Profile-aware `CreateInputBackend(path)` — linux backend uses profile for button mapping instead of hardcoded switch
-- [ ] Fallback: if no profile found, use current hardcoded defaults
-
-### Shell (`playos-shell`)
-- [ ] `ShellApp` loads device profile at startup
-  - Profile path: kernel cmdline `playos.profile=rog-ally` or auto-detect via DMI
+- [ ] `ShellApp` loads profile from `/etc/playos/device-profiles/` or kernel cmdline
 - [ ] `StatusBar` shows device name from profile
-
-### Reference device (`playos-reference-devices`)
-- [ ] Finalize `rog-ally/device-profile.toml` with real evdev codes (from `evtest`)
-- [ ] Deploy profile to ISO at `/etc/playos/device-profiles/rog-ally.toml`
-
-### Spec (`playos-spec`)
-- [ ] Fix `schemas/device-profile.schema.json` to match RFC-0006 (currently a stale stub)
-- [ ] Document the input mapping vocabulary in the RFC
+- [ ] Overlay shows device info (model, profile version)
 
 ---
 
