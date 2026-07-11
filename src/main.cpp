@@ -222,9 +222,9 @@ int main(int argc, char** argv) {
 
     PlayOS::Lifecycle::Init();
 
-    // ── Remixicon icon font (optional — falls back to letters if file absent) ──
-    // Codepoints: wifi=U+F2C0  bluetooth=U+EACC  battery=U+EAB0
-    //             battery-charge=U+EAAE  battery-low=U+EAB2
+    // ── Remixicon icon font (optional — falls back to letters if absent) ──
+    // Codepoints used: wifi=U+F2C0  bluetooth=U+EACC  battery=U+EAB0
+    //                  battery-charge=U+EAAE  battery-low=U+EAB2
     static const int kIconCPs[] = { 0xF2C0, 0xEACC, 0xEAB0, 0xEAAE, 0xEAB2 };
     Font iconFont = {};
     const char* iconFontPath = "/usr/share/playos/fonts/remixicon.ttf";
@@ -233,30 +233,11 @@ int main(int argc, char** argv) {
                               const_cast<int*>(kIconCPs), 5);
     }
     const bool hasIcons = (iconFont.baseSize > 0);
-    // UTF-8 encodings of the codepoints above
     const char* kIcoWifi   = "\xEF\x8B\x80"; // U+F2C0 wifi-line
     const char* kIcoBT     = "\xEA\xB3\x8C"; // U+EACC bluetooth-line
     const char* kIcoBatt   = "\xEA\xAA\xB0"; // U+EAB0 battery-line
     const char* kIcoBattCh = "\xEA\xAA\xAE"; // U+EAAE battery-charge-line
     const char* kIcoBattLo = "\xEA\xAA\xB2"; // U+EAB2 battery-low-line
-
-    // ── Load Remixicon icon font ────────────────────────────────────────────
-    // Codepoints we use (remixicon-line variants):
-    //   wifi          U+F2C0 \xEF\x8B\x80   signal-wifi  U+F134 \xEF\x84\xB4
-    //   bluetooth     U+EACC \xEA\xB3\x8C   bt-connect   U+EACA \xEA\xB2\x8A
-    //   battery       U+EAB0 \xEA\xAA\xB0   battery-chg  U+EAAE \xEA\xAA\xAE
-    //   battery-low   U+EAB2 \xEA\xAA\xB2   gamepad      U+EDAB \xED\xB6\xAB
-    static const int kIconCPs[] = {
-        0xF2C0, 0xF134, 0xEACC, 0xEACA, 0xEAB0, 0xEAAE, 0xEAB2, 0xEDAB };
-    constexpr int kIconCPCount = (int)(sizeof(kIconCPs)/sizeof(kIconCPs[0]));
-    constexpr int kIconSzFont  = 48;
-    Font iconFont = {};
-    const char* iconFontPath = "/usr/share/playos/fonts/remixicon.ttf";
-    if (FileExists(iconFontPath)) {
-        iconFont = LoadFontEx(iconFontPath, kIconSzFont,
-                              const_cast<int*>(kIconCPs), kIconCPCount);
-    }
-    const bool hasIcons = (iconFont.baseSize > 0);
 
     const auto library = DemoLibrary(exeDir);
     int selected = 0;
