@@ -223,21 +223,20 @@ int main(int argc, char** argv) {
     PlayOS::Lifecycle::Init();
 
     // ── Remixicon icon font (optional — falls back to letters if absent) ──
-    // Codepoints used: wifi=U+F2C0  bluetooth=U+EACC  battery=U+EAB0
-    //                  battery-charge=U+EAAE  battery-low=U+EAB2
-    static const int kIconCPs[] = { 0xF2C0, 0xEACC, 0xEAB0, 0xEAAE, 0xEAB2 };
+    // Codepoints used: wifi=U+F2C0  bluetooth=U+EACC
+    //                  battery=U+EAB0  battery-charge=U+EAAE
+    static const int kIconCPs[] = { 0xF2C0, 0xEACC, 0xEAB0, 0xEAAE };
     Font iconFont = {};
     const char* iconFontPath = "/usr/share/playos/fonts/remixicon.ttf";
     if (FileExists(iconFontPath)) {
         iconFont = LoadFontEx(iconFontPath, 52,
-                              const_cast<int*>(kIconCPs), 5);
+                              const_cast<int*>(kIconCPs), 4);
     }
     const bool hasIcons = (iconFont.baseSize > 0);
     const char* kIcoWifi   = "\xEF\x8B\x80"; // U+F2C0 wifi-line
     const char* kIcoBT     = "\xEA\xB3\x8C"; // U+EACC bluetooth-line
     const char* kIcoBatt   = "\xEA\xAA\xB0"; // U+EAB0 battery-line
     const char* kIcoBattCh = "\xEA\xAA\xAE"; // U+EAAE battery-charge-line
-    const char* kIcoBattLo = "\xEA\xAA\xB2"; // U+EAB2 battery-low-line
 
     const auto library = DemoLibrary(exeDir);
     int selected = 0;
@@ -302,8 +301,8 @@ int main(int argc, char** argv) {
                 const char* pctStr = TextFormat("%d%%", pct);
                 const int pctW = MeasureText(pctStr, 28);
                 if (hasIcons) {
-                    const char* ico = charging ? kIcoBattCh
-                                    : batt < 0.2f ? kIcoBattLo : kIcoBatt;
+                    // charging → battery-charge-line, else → battery-line
+                    const char* ico = charging ? kIcoBattCh : kIcoBatt;
                     Vector2 isz = MeasureTextEx(iconFont, ico, 44, 0);
                     int rx = W - (int)isz.x - pctW - 52;
                     DrawTextEx(iconFont, ico, {(float)rx, (float)(H-148)}, 44, 0, battCol);
