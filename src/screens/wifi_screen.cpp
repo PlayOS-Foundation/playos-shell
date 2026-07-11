@@ -114,8 +114,7 @@ void WiFiScreen::Draw(int W, int H) {
         constexpr int kRowH    = 100;
         constexpr int kTop     = 200;
         constexpr int kLeft    = 80;
-        constexpr int kListW   = W - 160;  // W is a variable, so use at draw time
-        (void)kListW;
+
 
         for (int i = 0; i < (int)m_networks.size(); ++i) {
             const int y = kTop + i * kRowH;
