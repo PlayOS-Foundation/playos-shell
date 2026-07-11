@@ -11,7 +11,6 @@
 
 #include "playos/playos.h"
 #include "playos/runtime/process.h"
-
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -231,6 +230,23 @@ int main(int argc, char** argv) {
         } else {
             DrawText("No controller", W - 260, 16, 32,
                      Color{100, 100, 110, 255});
+        }
+
+        // Battery indicator (top-right, only when capability present)
+        if (PlayOS::Capabilities::Has(PlayOS::Capability::Battery)) {
+            const float batt = PlayOS::Battery::Level();
+            const bool charging = PlayOS::Battery::IsCharging();
+            if (batt >= 0.0f) {
+                const int pct = (int)(batt * 100.0f + 0.5f);
+                Color battCol = batt > 0.3f ? Color{80, 200, 80, 255}
+                              : batt > 0.1f ? Color{220, 180, 40, 255}
+                                            : Color{220, 60, 60, 255};
+                const char* battLabel = charging
+                    ? TextFormat("~%d%%", pct)
+                    : TextFormat("%d%%", pct);
+                const int bw = MeasureText(battLabel, 28);
+                DrawText(battLabel, W - bw - 20, H - 56, 28, battCol);
+            }
         }
 
         // Category heading
