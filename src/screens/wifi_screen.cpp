@@ -110,14 +110,19 @@ void WiFiScreen::Update(float dt) {
         // Read typed characters (GLFW char callback — works when compositor
         // properly forwards xkb modifiers to the Wayland client).
         int ch;
+        bool gotChar = false;
         while ((ch = GetCharPressed()) > 0) {
-            if (ch >= 32 && ch < 127 && m_password.size() < 63)
+            if (ch >= 32 && ch < 127 && m_password.size() < 63) {
                 m_password += (char)ch;
+                gotChar = true;
+            }
         }
 
-        // Belt-and-suspenders: also detect common keys with Shift awareness
-        // in case the compositor or GLFW doesn't translate shifted chars.
-        AppendTypedChar();
+        // Fallback: raw key detection with Shift awareness for US layout.
+        // Only fires when GLFW didn't produce a character (e.g. compositor
+        // modifier handling is broken).
+        if (!gotChar)
+            AppendTypedChar();
 
         // Backspace
         if (IsKeyPressed(KEY_BACKSPACE) && !m_password.empty())
