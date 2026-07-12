@@ -51,14 +51,12 @@ int ShellApp::Run(int argc, char** argv) {
     m_icons.Load();
     TraceLog(LOG_INFO, "PLAYOS-SHELL: Icons loaded");
 
-    TraceLog(LOG_INFO, "PLAYOS-SHELL: Loading device profile...");
+    // Only load from /run (safe tmpfs staged by initramfs).  Never read
+    // TOML files from EROFS — tomlplusplus segfaults on EROFS content.
     std::string profilePath;
     const char* profileId = std::getenv("PLAYOS_PROFILE");
     if (profileId && profileId[0]) {
         profilePath = std::string("/run/playos/profiles/") + profileId + ".toml";
-        std::ifstream test(profilePath);
-        if (!test.is_open())
-            profilePath = std::string("/etc/playos/device-profiles/") + profileId + ".toml";
     } else {
         std::string profileName;
         std::ifstream dmi("/sys/class/dmi/id/product_name");
@@ -72,17 +70,7 @@ int ShellApp::Run(int argc, char** argv) {
             else if (product.find("Legion Go") != std::string::npos)
                 profileName = "legion-go";
         }
-        if (!profileName.empty()) {
-            profilePath = "/run/playos/profiles/" + profileName + ".toml";
-            std::ifstream test(profilePath);
-            if (!test.is_open())
-                profilePath = "/etc/playos/device-profiles/" + profileName + ".toml";
-        } else {
-            profilePath = "/run/playos/profiles/default.toml";
-            std::ifstream test(profilePath);
-            if (!test.is_open())
-                profilePath = "/etc/playos/device-profiles/default.toml";
-        }
+        profilePath = "/run/playos/profiles/" + (profileName.empty() ? "default" : profileName) + ".toml";
     }
     if (auto p = PlayOS::DeviceProfile::Load(profilePath)) {
         m_statusBar.SetDeviceName(p->device().name);
