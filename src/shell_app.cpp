@@ -55,21 +55,34 @@ int ShellApp::Run(int argc, char** argv) {
     std::string profilePath;
     const char* profileId = std::getenv("PLAYOS_PROFILE");
     if (profileId && profileId[0]) {
-        profilePath = std::string("/etc/playos/device-profiles/") + profileId + ".toml";
+        profilePath = std::string("/run/playos/profiles/") + profileId + ".toml";
+        std::ifstream test(profilePath);
+        if (!test.is_open())
+            profilePath = std::string("/etc/playos/device-profiles/") + profileId + ".toml";
     } else {
+        std::string profileName;
         std::ifstream dmi("/sys/class/dmi/id/product_name");
         if (dmi.is_open()) {
             std::string product;
             std::getline(dmi, product);
             if (product.find("ROG Ally") != std::string::npos)
-                profilePath = "/etc/playos/device-profiles/rog-ally.toml";
+                profileName = "rog-ally";
             else if (product.find("Steam Deck") != std::string::npos)
-                profilePath = "/etc/playos/device-profiles/steam-deck.toml";
+                profileName = "steam-deck";
             else if (product.find("Legion Go") != std::string::npos)
-                profilePath = "/etc/playos/device-profiles/legion-go.toml";
+                profileName = "legion-go";
         }
-        if (profilePath.empty())
-            profilePath = "/etc/playos/device-profiles/default.toml";
+        if (!profileName.empty()) {
+            profilePath = "/run/playos/profiles/" + profileName + ".toml";
+            std::ifstream test(profilePath);
+            if (!test.is_open())
+                profilePath = "/etc/playos/device-profiles/" + profileName + ".toml";
+        } else {
+            profilePath = "/run/playos/profiles/default.toml";
+            std::ifstream test(profilePath);
+            if (!test.is_open())
+                profilePath = "/etc/playos/device-profiles/default.toml";
+        }
     }
     if (auto p = PlayOS::DeviceProfile::Load(profilePath)) {
         m_statusBar.SetDeviceName(p->device().name);
