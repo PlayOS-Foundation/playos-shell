@@ -131,8 +131,8 @@ void InstallerScreen::Draw(int W, int H) {
 
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                          0.1f, 12, Color{18, 18, 28, 255});
-    DrawRectangleRoundedLinesEx({(float)px, (float)py, (float)panW, (float)panH},
-                                 0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+    DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
+                               0.1f, 12, 2.0f, Color{60, 60, 100, 255});
 
     // Title
     DrawText("INSTALL TO DISK", px + 40, py + 36, 48, Color{220, 80, 80, 255});

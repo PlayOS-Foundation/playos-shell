@@ -22,25 +22,43 @@ function(playos_add_dependency name)
     endif()
 endfunction()
 
-# Raylib must be fetched BEFORE playos-platform-api so the platform-api's
-# CMakeLists.txt can see the raylib target and build its raylib backends.
-FetchContent_Declare(raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG 6.0)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
-
-# On Linux the shell runs as a Wayland client of the PlayOS compositor. Enable
-# PLAYOS_SHELL_WAYLAND to build Raylib's GLFW with the Wayland backend (only)
-# instead of X11. Requires wayland-protocols and libxkbcommon-dev. Off by
-# default so the standard desktop (X11) build is unaffected.
-option(PLAYOS_SHELL_WAYLAND "Build the shell for Wayland (Linux)" OFF)
-if(PLAYOS_SHELL_WAYLAND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+# Raylib: use system package on platforms like Alpine where it's provided,
+# otherwise fetch raylib 6.0 via FetchContent (default for Windows/macOS).
+option(PLAYOS_USE_SYSTEM_RAYLIB "Use system-installed raylib (pkg-config)" OFF)
+if(PLAYOS_USE_SYSTEM_RAYLIB)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(RAYLIB REQUIRED raylib)
+    message(STATUS "PlayOS shell: using system raylib ${RAYLIB_VERSION}")
+    # Create an imported target for compatibility with the rest of the build.
+    add_library(raylib SHARED IMPORTED)
+    set_target_properties(raylib PROPERTIES
+        IMPORTED_LOCATION "${RAYLIB_LIBRARY_DIRS}/libraylib.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${RAYLIB_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES "${RAYLIB_LIBRARIES}")
+    # Platform API backends expect GLFW already linked through raylib.
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
-endif()
+else()
+    # Raylib must be fetched BEFORE playos-platform-api so the platform-api's
+    # CMakeLists.txt can see the raylib target and build its raylib backends.
+    FetchContent_Declare(raylib
+        GIT_REPOSITORY https://github.com/raysan5/raylib.git
+        GIT_TAG 6.0)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(raylib)
+    # On Linux the shell runs as a Wayland client of the PlayOS compositor. Enable
+    # PLAYOS_SHELL_WAYLAND to build Raylib's GLFW with the Wayland backend (only)
+    # instead of X11. Requires wayland-protocols and libxkbcommon-dev. Off by
+    # default so the standard desktop (X11) build is unaffected.
+    option(PLAYOS_SHELL_WAYLAND "Build the shell for Wayland (Linux)" OFF)
+    if(PLAYOS_SHELL_WAYLAND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_MakeAvailable(raylib)
+endif()
 
 playos_add_dependency(playos-platform-api)
 playos_add_dependency(playos-runtime)
