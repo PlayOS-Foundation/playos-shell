@@ -93,8 +93,9 @@ void InstallerScreen::StartInstall() {
         flag.close();
     }
 
-    // Start the installer service (stops compositor, runs install script, reboots)
-    std::system("systemctl start playos-installer.service &");
+    // Start the installer service (OpenRC). It stops the compositor,
+    // partitions the disk, copies the system, and reboots.
+    std::system("rc-service playos-installer start &");
 
     m_installing = true;
     m_installTimer = 0.0f;
