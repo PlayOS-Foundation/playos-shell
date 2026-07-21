@@ -324,7 +324,7 @@ void InstallerScreen::Draw(int W, int H) {
         DrawText(m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, Color{140, 140, 180, 255});
 
         DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{30, 30, 50, 255});
-        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{60, 60, 100, 255});
+        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 2.0f, Color{60, 60, 100, 255});
 
         float drawProgress = m_stepProgress;
         if (m_step > Step::WritingImage) {
@@ -359,7 +359,7 @@ void InstallerScreen::Draw(int W, int H) {
                  barY - 10, 28, Color{140, 140, 180, 255});
 
         DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{30, 30, 50, 255});
-        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{60, 60, 100, 255});
+        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 2.0f, Color{60, 60, 100, 255});
         DrawRectangleRounded({(float)(barX + 2), (float)(barY + 2), (float)(barW - 4), (float)(barH - 4)},
                              0.3f, 8, Color{60, 200, 80, 255});
         int tw = MeasureText("100%", 24);
@@ -400,7 +400,7 @@ void InstallerScreen::Draw(int W, int H) {
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                          0.1f, 12, Color{18, 18, 28, 255});
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                               0.1f, 12, Color{60, 60, 100, 255});
+                               0.1f, 12, 2.0f, Color{60, 60, 100, 255});
 
     DrawText("INSTALL TO DISK", px + 40, py + 36, 48, Color{220, 80, 80, 255});
     DrawRectangle(px + 40, py + 100, panW - 80, 2, Color{40, 40, 70, 255});
