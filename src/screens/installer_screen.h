@@ -3,6 +3,7 @@
 #include "../screen.h"
 #include "../screen_stack.h"
 #include <string>
+#include <sys/types.h>
 
 class InstallerScreen : public IScreen {
 public:
@@ -19,16 +20,37 @@ private:
     float m_installTimer = 0.0f;
     float m_completeTimer = 0.0f;
 
-    // Polled from /run/playos/install-status
-    std::string m_statusStage = "starting";
-    int m_statusPercent = 0;
-    std::string m_statusError;
+    // Install pipeline state
+    enum class Step {
+        FindingImage,
+        WritingImage,
+        RelocatingGPT,
+        ResizingPartition,
+        ResizingFS,
+        Rebooting,
+        Done,
+        Failed
+    };
+    Step m_step = Step::FindingImage;
+    float m_stepProgress = 0.0f;  // 0.0 - 1.0 within current step
+    std::string m_errorMsg;
+
+    // dd progress parsing
+    pid_t m_childPid = -1;
+    long long m_bytesWritten = 0;
+    long long m_totalBytes = 0;
 
     std::string m_diskName;
     std::string m_diskPath;
     std::string m_diskSize;
+    std::string m_imagePath;
 
     void DetectDisk();
+    bool FindImage();
     void StartInstall();
-    static constexpr const char* kDiskFile = "/run/playos/install-target";
+    void RunWriteStep();
+    void RunPartitionSteps();
+    void ParseDDProgress();
+    void CleanupChild();
+    static constexpr const char* kProgressFile = "/run/playos/dd-progress";
 };

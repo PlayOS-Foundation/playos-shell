@@ -41,7 +41,7 @@ void OverlayScreen::Draw(int W, int H) {
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                          0.1f, 12, Color{18, 18, 28, 255});
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                               0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+                               0.1f, 12, Color{60, 60, 100, 255});
 
     // Title
     DrawText("SYSTEM", px + 40, py + 36, 52, Color{180, 180, 220, 255});

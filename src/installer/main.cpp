@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
             DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                                  0.1f, 12, Color{18, 18, 28, 255});
             DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                                       0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+                                       0.1f, 12, Color{60, 60, 100, 255});
 
             DrawText("INSTALL TO DISK", px + 40, py + 36, 48, Color{220, 80, 80, 255});
             DrawRectangle(px + 40, py + 100, panW - 80, 2, Color{40, 40, 70, 255});
@@ -256,7 +256,7 @@ int main(int argc, char** argv) {
             DrawRectangleRounded({(float)barX, (float)barY, (float)barW, 40.0f},
                                  0.3f, 8, Color{30, 30, 50, 255});
             DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, 40.0f},
-                                       0.3f, 8, 2.0f, Color{60, 60, 100, 255});
+                                       0.3f, 8, Color{60, 60, 100, 255});
 
             float progress = GetProgress(statusStage, statusPercent);
             if (progress > 0.001f) {
@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
             DrawRectangleRounded({(float)barX, (float)barY, (float)barW, 40.0f},
                                  0.3f, 8, Color{30, 30, 50, 255});
             DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, 40.0f},
-                                       0.3f, 8, 2.0f, Color{60, 60, 100, 255});
+                                       0.3f, 8, Color{60, 60, 100, 255});
             DrawRectangleRounded({(float)(barX + 2), (float)(barY + 2), (float)(barW - 4), 36.0f},
                                  0.3f, 8, Color{60, 200, 80, 255});
             DrawText("100%", barX + barW / 2 - 40, barY + 8, 24, RAYWHITE);

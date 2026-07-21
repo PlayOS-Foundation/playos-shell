@@ -72,7 +72,7 @@ add_executable(playos-shell
     src/screens/library_screen.cpp
     src/screens/overlay_screen.cpp
     src/screens/wifi_screen.cpp
-    src/screens/installer_screen.cpp  # deprecated, kept for reference
+    src/screens/installer_screen.cpp  # dd-based disk image installer
 )
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
