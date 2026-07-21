@@ -225,7 +225,7 @@ void WiFiScreen::Draw(int W, int H) {
                              0.2f, 8, Color{30, 30, 50, 255});
         DrawRectangleRoundedLines({(float)(W / 2 - 400), (float)(H / 2 - 40),
                                    800.0f, 80.0f},
-                                  0.2f, 8, Color{80, 80, 140, 255});
+                                  0.2f, 8, 2.0f, Color{80, 80, 140, 255});
 
         // Show masked or clear text
         std::string display = m_passVisible ? m_password
