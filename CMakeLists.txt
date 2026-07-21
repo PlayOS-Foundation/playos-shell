@@ -72,7 +72,7 @@ add_executable(playos-shell
     src/screens/library_screen.cpp
     src/screens/overlay_screen.cpp
     src/screens/wifi_screen.cpp
-    src/screens/installer_screen.cpp
+    src/screens/installer_screen.cpp  # deprecated, kept for reference
 )
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
@@ -106,3 +106,11 @@ else()
     target_link_libraries(playos-shell PRIVATE PlayOS::playos-network-null)
     target_link_libraries(playos-shell PRIVATE PlayOS::playos-bluetooth-null)
 endif()
+
+# Standalone Installer GUI — minimal raylib-only app, no PlayOS API dependencies.
+# Spawned from the shell's overlay menu. Polls /run/playos/install-status
+# for progress updates from the shell-based installer script.
+add_executable(playos-installer-gui
+    src/installer/main.cpp
+)
+target_link_libraries(playos-installer-gui PRIVATE raylib)

@@ -176,9 +176,15 @@ void WiFiScreen::Draw(int W, int H) {
         constexpr int kTop     = 200;
         constexpr int kLeft    = 80;
 
+        // Auto-scroll: keep selected item in view
+        const int visibleRows = (H - 100 - kTop) / kRowH;
+        if (m_selected < m_scrollOffset)
+            m_scrollOffset = m_selected;
+        if (m_selected >= m_scrollOffset + visibleRows)
+            m_scrollOffset = m_selected - visibleRows + 1;
 
-        for (int i = 0; i < (int)m_networks.size(); ++i) {
-            const int y = kTop + i * kRowH;
+        for (int i = m_scrollOffset; i < (int)m_networks.size(); ++i) {
+            const int y = kTop + (i - m_scrollOffset) * kRowH;
             if (y + kRowH > H - 100) break; // don't draw off-screen
             const bool sel = (i == m_selected);
             const auto& n = m_networks[i];
@@ -273,6 +279,7 @@ void WiFiScreen::DrawSignalBars(int x, int y, int signal, bool active) const {
 void WiFiScreen::DoScan() {
     m_networks = PlayOS::Network::ScanNetworks();
     m_selected = 0;
+    m_scrollOffset = 0;
     // Move connected network to top
     for (int i = 0; i < (int)m_networks.size(); ++i) {
         if (m_networks[i].active) { m_selected = i; break; }

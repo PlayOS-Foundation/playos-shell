@@ -31,6 +31,7 @@ private:
     // Network list
     std::vector<PlayOS::Network::WiFiNetwork> m_networks;
     int m_selected = 0;
+    int m_scrollOffset = 0;
 
     // Password entry
     std::string m_password;

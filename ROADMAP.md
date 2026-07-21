@@ -76,13 +76,22 @@ OS-specific code in the shell itself.
 - [ ] `PowerScreen` — sleep / shutdown / restart
 
 ### Installer
-- [x] `InstallerScreen` — "Install PlayOS to Disk" with disk detection + confirmation
-  - Auto-detects internal disk (nvme0n1 / sda)
-  - Confirmation prompt: "This will ERASE ALL DATA. Continue?"
-  - Spawns `playos-installer.service` which stops compositor, partitions, copies rootfs, installs bootloader, reboots
-  - Accessible via Home → Install to Disk
-- [x] `/usr/bin/playos-install` — shell script: GPT partition (ESP + root), rsync live system, systemd-boot, fstab
-- [x] `playos-installer.service` — oneshot systemd unit that runs the installer on console
+- [x] `playos-installer-gui` — standalone raylib GUI application for disk installation
+  - Spawned from Shell overlay menu: "Install to Disk" → launches `playos-installer-gui &`
+  - Auto-detects internal disk (nvme0n1 / sda / vda / mmcblk0)
+  - Confirmation screen: "This will ERASE ALL DATA. Continue?" with disk info
+  - Forks `/usr/bin/playos-installer` shell script for backend
+  - Polls `/run/playos/install-status` for real-time progress (stages + percentage)
+  - Renders animated progress bar with stage labels
+  - On complete: shows "Rebooting..." and triggers reboot via `reboot -f`
+  - On failure: shows error with log path for debugging
+  - Links against raylib only — no PlayOS API dependencies (lightweight, ~290 lines)
+- [x] `/usr/bin/playos-installer` — standalone shell script (no OpenRC wrapper)
+  - Updates APK repos → partitions with setup-disk → configures services → EFI cleanup
+  - Writes progress stages to `/run/playos/install-status` for GUI polling
+  - Copies PlayOS binaries, services, libs, samples, SSH keys to installed root
+  - Handles NVMe/SATA/eMMC partition naming
+- [x] Source: `playos-shell/src/installer/main.cpp` (GUI) + `playos-refdistro/alpine/install-script/playos-installer` (backend)
 
 ---
 

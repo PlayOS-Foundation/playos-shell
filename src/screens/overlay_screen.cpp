@@ -4,6 +4,7 @@
 
 #include "raylib.h"
 #include "playos/playos.h"
+#include <cstdlib>
 #include <memory>
 
 constexpr OverlayScreen::MenuItem OverlayScreen::kItems[];

@@ -1,18 +1,48 @@
 #include "installer_screen.h"
 
 #include "raylib.h"
+#include "playos/playos.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <sstream>
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-static bool PressedUp()      { return IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W);     }
-static bool PressedDown()    { return IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S);     }
-static bool PressedConfirm() { return IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE); }
-static bool PressedBack()    { return IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_B);    }
+static bool PressedUp()      { return PlayOS::Input::Pressed(PlayOS::Button::DPadUp)   || IsKeyPressed(KEY_UP);    }
+static bool PressedDown()    { return PlayOS::Input::Pressed(PlayOS::Button::DPadDown) || IsKeyPressed(KEY_DOWN);  }
+static bool PressedConfirm() { return PlayOS::Input::Pressed(PlayOS::Button::A)        || IsKeyPressed(KEY_ENTER); }
+static bool PressedBack()    { return PlayOS::Input::Pressed(PlayOS::Button::B)        || IsKeyPressed(KEY_ESCAPE)
+                                   || PlayOS::Input::Pressed(PlayOS::Button::Home); }
+
+// ── Read install status file ─────────────────────────────────────────────────
+
+static void ReadStatus(std::string& stage, int& percent, std::string& errorMsg) {
+    stage = "starting";
+    percent = 0;
+    errorMsg.clear();
+
+    std::ifstream f("/run/playos/install-status");
+    if (!f.is_open()) return;
+
+    std::string line;
+    std::getline(f, line);
+
+    auto colon = line.find(':');
+    if (colon != std::string::npos) {
+        stage = line.substr(0, colon);
+        std::string rest = line.substr(colon + 1);
+        if (stage == "installing") {
+            percent = std::stoi(rest);
+        } else if (stage == "failed") {
+            errorMsg = rest;
+        }
+    } else {
+        stage = line;
+    }
+}
 
 // ── Detect internal disk ─────────────────────────────────────────────────────
 
@@ -69,6 +99,16 @@ void InstallerScreen::OnEnter() {
 void InstallerScreen::Update(float dt) {
     if (m_installing) {
         m_installTimer += dt;
+        ReadStatus(m_statusStage, m_statusPercent, m_statusError);
+
+        // On complete, wait a moment so user sees "Rebooting..." then reboot
+        if (m_statusStage == "complete") {
+            m_completeTimer += dt;
+            if (m_completeTimer > 3.0f) {
+                std::system("reboot -f || echo b > /proc/sysrq-trigger &");
+            }
+            return;
+        }
         return;
     }
 
@@ -93,12 +133,20 @@ void InstallerScreen::StartInstall() {
         flag.close();
     }
 
-    // Start the installer service (OpenRC). It stops the compositor,
-    // partitions the disk, copies the system, and reboots.
-    std::system("rc-service playos-installer start &");
+    // Initialize status file
+    std::ofstream sf("/run/playos/install-status");
+    if (sf.is_open()) {
+        sf << "starting\n";
+        sf.close();
+    }
+
+    // Start the installer in background — standalone shell script
+    // that writes progress stages to /run/playos/install-status.
+    std::system("/usr/bin/playos-installer &");
 
     m_installing = true;
     m_installTimer = 0.0f;
+    m_completeTimer = 0.0f;
 }
 
 // ── Draw ─────────────────────────────────────────────────────────────────────
@@ -109,20 +157,82 @@ void InstallerScreen::Draw(int W, int H) {
 
     if (m_installing) {
         // ── Installing state ────────────────────────────────────────────────
-        const char* msg = "Installing PlayOS to internal disk...";
-        int tw = MeasureText(msg, 36);
-        DrawText(msg, (W - tw) / 2, H / 2 - 60, 36, RAYWHITE);
+        const int barX = W / 2 - 300;
+        const int barY = H / 2 - 30;
+        const int barW = 600;
+        const int barH = 40;
 
-        const char* sub = "The system will reboot when complete.";
-        tw = MeasureText(sub, 24);
-        DrawText(sub, (W - tw) / 2, H / 2 - 10, 24, Color{140, 140, 180, 255});
+        // Stage label
+        const char* stageLabel = "Preparing...";
+        if (m_statusStage == "starting")         stageLabel = "Starting installer...";
+        else if (m_statusStage == "updating_repos") stageLabel = "Updating package repositories...";
+        else if (m_statusStage == "partitioning") stageLabel = "Partitioning disk...";
+        else if (m_statusStage == "installing")  stageLabel = TextFormat("Installing system... %d%%", m_statusPercent);
+        else if (m_statusStage == "configuring") stageLabel = "Configuring PlayOS services...";
 
-        // Animated dots
-        int dots = ((int)(m_installTimer * 2.0f)) % 4;
-        char dotStr[] = "....";
-        dotStr[dots] = '\0';
-        tw = MeasureText(dotStr, 48);
-        DrawText(dotStr, (W - tw) / 2, H / 2 + 40, 48, Color{100, 200, 100, 255});
+        int tw = MeasureText(stageLabel, 32);
+        DrawText(stageLabel, (W - tw) / 2, barY - 60, 32, RAYWHITE);
+
+        // Subtitle
+        const char* sub;
+        if (m_statusStage == "failed") {
+            sub = m_statusError.c_str();
+        } else if (m_statusStage == "complete") {
+            sub = "Rebooting in a moment...";
+        } else {
+            sub = m_diskPath.c_str();
+        }
+        tw = MeasureText(sub, 22);
+        DrawText(sub, (W - tw) / 2, barY - 20, 22, Color{140, 140, 180, 255});
+
+        // Progress bar background
+        DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{30, 30, 50, 255});
+        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 2.0f, Color{60, 60, 100, 255});
+
+        // Determine progress
+        float progress = 0.0f;
+        if (m_statusStage == "complete") {
+            progress = 1.0f;
+        } else if (m_statusStage == "failed") {
+            progress = (float)m_statusPercent / 100.0f;  // show partial
+        } else if (m_statusStage == "installing") {
+            progress = (float)m_statusPercent / 100.0f;
+        } else if (m_statusStage == "configuring") {
+            progress = 0.98f;
+        } else if (m_statusStage == "partitioning") {
+            progress = 0.02f;
+        } else if (m_statusStage == "updating_repos") {
+            progress = 0.01f;
+        }
+
+        if (progress > 0.0f) {
+            Color barColor;
+            if (m_statusStage == "failed") {
+                barColor = Color{220, 60, 60, 255};
+            } else if (m_statusStage == "complete") {
+                barColor = Color{60, 200, 80, 255};
+            } else {
+                barColor = Color{80, 140, 240, 255};
+            }
+            DrawRectangleRounded({(float)barX + 2, (float)barY + 2,
+                                  (float)barW * progress - 4, (float)barH - 4},
+                                 0.3f, 8, barColor);
+
+            // Percentage text inside bar
+            int pct = (int)(progress * 100.0f);
+            const char* pctText = TextFormat("%d%%", pct);
+            tw = MeasureText(pctText, 24);
+            DrawText(pctText, barX + barW/2 - tw/2, barY + 8, 24, RAYWHITE);
+        }
+
+        // Error dismiss button
+        if (m_statusStage == "failed" && PressedConfirm()) {
+            m_stack.Pop();
+        }
+        if (m_statusStage == "failed" && PressedBack()) {
+            m_stack.Pop();
+        }
+
         return;
     }
 
