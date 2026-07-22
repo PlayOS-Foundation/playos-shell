@@ -260,10 +260,21 @@ void InstallerScreen::Update(float dt) {
         }
 
         if (m_step == Step::Rebooting) {
-            m_completeTimer += dt;
-            if (m_completeTimer > 3.0f) {
-                std::system("reboot -f || echo b > /proc/sysrq-trigger &");
-                m_completeTimer = 0.0f;
+            if (PressedUp() || PressedDown()) {
+                m_rebootSelected = 1 - m_rebootSelected;
+            }
+            if (PressedConfirm()) {
+                if (m_rebootSelected == 0) {
+                    std::system("reboot -f || echo b > /proc/sysrq-trigger &");
+                    m_step = Step::Done;
+                } else {
+                    CleanupChild();
+                    m_installing = false;
+                    m_step = Step::FindingImage;
+                }
+            }
+            if (PressedBack()) {
+                m_rebootSelected = 1;
             }
             return;
         }
@@ -346,24 +357,40 @@ void InstallerScreen::Draw(int W, int H) {
 
     // ── Complete state ──────────────────────────────────────────────────────
     if (m_installing && m_step == Step::Rebooting) {
-        const int barX = W / 2 - 300;
-        const int barY = H / 2 - 30;
-        const int barW = 600;
-        const int barH = 40;
+        const int panW = 640, panH = 340;
+        const int px = (W - panW) / 2, py = (H - panH) / 2;
 
-        DrawText("Installation complete!",
-                 W / 2 - MeasureText("Installation complete!", 36) / 2,
-                 barY - 60, 36, Color{80, 220, 120, 255});
-        DrawText("Rebooting in a moment...",
-                 W / 2 - MeasureText("Rebooting in a moment...", 28) / 2,
-                 barY - 10, 28, Color{140, 140, 180, 255});
+        DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
+                             0.1f, 12, Color{18, 18, 28, 255});
+        DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
+                                   0.1f, 12, 2.0f, Color{60, 60, 100, 255});
 
-        DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{30, 30, 50, 255});
-        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 2.0f, Color{60, 60, 100, 255});
-        DrawRectangleRounded({(float)(barX + 2), (float)(barY + 2), (float)(barW - 4), (float)(barH - 4)},
-                             0.3f, 8, Color{60, 200, 80, 255});
-        int tw = MeasureText("100%", 24);
-        DrawText("100%", barX + barW / 2 - tw / 2, barY + 8, 24, RAYWHITE);
+        DrawText("INSTALLATION COMPLETE",
+                 W / 2 - MeasureText("INSTALLATION COMPLETE", 40) / 2,
+                 py + 40, 40, Color{80, 220, 120, 255});
+
+        DrawText("PlayOS has been written to disk successfully.",
+                 W / 2 - MeasureText("PlayOS has been written to disk successfully.", 22) / 2,
+                 py + 100, 22, Color{180, 180, 200, 255});
+        DrawText("Remove the PXE / installation media before rebooting.",
+                 W / 2 - MeasureText("Remove the PXE / installation media before rebooting.", 20) / 2,
+                 py + 130, 20, Color{140, 140, 160, 255});
+
+        int by = py + panH - 100;
+
+        Color rebBg = (m_rebootSelected == 0) ? Color{200, 40, 40, 255} : Color{60, 20, 20, 255};
+        DrawRectangleRounded({(float)(px + 40), (float)by, 260.0f, 56.0f}, 0.3f, 8, rebBg);
+        DrawText("Reboot Now", px + 60, by + 12, 28,
+                 (m_rebootSelected == 0) ? RAYWHITE : Color{140, 80, 80, 255});
+
+        Color stayBg = (m_rebootSelected == 1) ? Color{40, 40, 60, 255} : Color{25, 25, 40, 255};
+        DrawRectangleRounded({(float)(px + 340), (float)by, 260.0f, 56.0f}, 0.3f, 8, stayBg);
+        DrawText("Stay in Shell", px + 360, by + 12, 28,
+                 (m_rebootSelected == 1) ? RAYWHITE : Color{100, 100, 130, 255});
+
+        DrawText("[Up/Down] Choose    [Enter] Confirm",
+                 W / 2 - MeasureText("[Up/Down] Choose    [Enter] Confirm", 20) / 2,
+                 py + panH - 28, 20, Color{80, 80, 100, 255});
         return;
     }
 

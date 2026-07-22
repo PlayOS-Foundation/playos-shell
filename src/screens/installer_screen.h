@@ -19,6 +19,7 @@ private:
     bool m_installing = false;
     float m_installTimer = 0.0f;
     float m_completeTimer = 0.0f;
+    int m_rebootSelected = 0;  // 0 = Reboot Now, 1 = Stay in Shell
 
     // Install pipeline state
     enum class Step {
