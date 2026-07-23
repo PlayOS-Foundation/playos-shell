@@ -2,9 +2,10 @@
 // Owns the window, screen stack, status bar, and main loop.
 #pragma once
 
-#include "screen_stack.h"
-#include "status_bar.h"
-#include "icons.h"
+#include "core/screen_stack.h"
+#include "core/app_context.h"
+#include "ui/status_bar.h"
+#include "ui/icons.h"
 #include <filesystem>
 
 class ShellApp {
@@ -16,4 +17,5 @@ private:
     Icons       m_icons;
     StatusBar   m_statusBar{m_icons};
     ScreenStack m_stack;
+    AppContext  m_ctx{m_stack};
 };

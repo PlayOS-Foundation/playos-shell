@@ -3,18 +3,18 @@
 // Dims the background screen and shows a system menu.
 #pragma once
 
-#include "../screen.h"
-#include "../screen_stack.h"
+#include "../core/screen.h"
+#include "../core/app_context.h"
 
 class OverlayScreen : public IScreen {
 public:
-    explicit OverlayScreen(ScreenStack& stack);
+    explicit OverlayScreen(AppContext& ctx);
 
     void Update(float dt) override;
     void Draw(int W, int H) override;
 
 private:
-    ScreenStack& m_stack;
+    AppContext& m_ctx;
     int m_selected = 0;
 
     struct MenuItem { const char* label; const char* hint; };

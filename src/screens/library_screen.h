@@ -2,8 +2,8 @@
 // The default home screen: game list, navigation, launch.
 #pragma once
 
-#include "../screen.h"
-#include "../screen_stack.h"
+#include "../core/screen.h"
+#include "../core/app_context.h"
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -22,14 +22,14 @@ public:
     // onPushScreen is called when the screen wants to push another screen
     // (e.g. overlay on Home press).
     explicit LibraryScreen(const std::filesystem::path& exeDir,
-                           ScreenStack& stack);
+                           AppContext& ctx);
 
     void OnEnter() override;
     void Update(float dt) override;
     void Draw(int W, int H) override;
 
 private:
-    ScreenStack&             m_stack;
+    AppContext&              m_ctx;
     std::vector<GameEntry>   m_library;
     int                      m_selected = 0;
     std::string              m_status;

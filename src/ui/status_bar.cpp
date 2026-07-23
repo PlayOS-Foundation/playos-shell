@@ -1,4 +1,5 @@
 #include "status_bar.h"
+#include "theme.h"
 
 #include "raylib.h"
 #include "playos/playos.h"
@@ -34,23 +35,23 @@ void StatusBar::Poll() {
     m_ip = (ip && ip[0] != '\0') ? ip : "";
 }
 
-void StatusBar::Draw(int W, int H) const {
+void StatusBar::Draw(int W, int H, const Theme& theme) const {
     // ── top bar ──────────────────────────────────────────────────────────
-    DrawRectangle(0, 0, W, 72, Color{8, 8, 14, 180});
+    DrawRectangle(0, 0, W, 72, theme.statusBarBg);
 
     // Device name from profile (e.g. "ASUS ROG Ally") next to "PlayOS"
     if (!m_deviceName.empty()) {
         DrawText(TextFormat("PlayOS  ·  %s", m_deviceName.c_str()),
-                 32, 16, 32, Color{180, 180, 200, 255});
+                 32, 16, 32, theme.textPrimary);
     } else {
-        DrawText("PlayOS", 32, 16, 40, Color{180, 180, 200, 255});
+        DrawText("PlayOS", 32, 16, 40, theme.textPrimary);
     }
 
     if (m_controllerOn) {
-        DrawCircle(W - 200, 36, 10, Color{60, 200, 80, 255});
-        DrawText("Controller", W - 176, 16, 32, Color{140, 160, 150, 255});
+        DrawCircle(W - 200, 36, 10, theme.success);
+        DrawText("Controller", W - 176, 16, 32, theme.textSecondary);
     } else {
-        DrawText("No controller", W - 260, 16, 32, Color{100, 100, 110, 255});
+        DrawText("No controller", W - 260, 16, 32, theme.inactive);
     }
 
     // ── bottom-right indicators ───────────────────────────────────────────
@@ -58,9 +59,9 @@ void StatusBar::Draw(int W, int H) const {
     // Battery
     if (m_hasBattery && m_battLevel >= 0.0f) {
         const int pct = (int)(m_battLevel * 100.0f + 0.5f);
-        Color col = m_battLevel > 0.3f ? Color{80, 200, 80, 255}
-                  : m_battLevel > 0.1f ? Color{220, 180, 40, 255}
-                                       : Color{220, 60, 60, 255};
+        Color col = m_battLevel > 0.3f ? theme.success
+                  : m_battLevel > 0.1f ? theme.warning
+                                       : theme.danger;
         const char* pctStr  = TextFormat("%d%%", pct);
         const char* glyph   = m_battCharging ? Icons::BatteryCharge : Icons::Battery;
         const char* fallback = m_battCharging ? "~" : "";
@@ -78,17 +79,17 @@ void StatusBar::Draw(int W, int H) const {
         int xCursor = W - 40;
 
         // Bluetooth
-        Color btCol = m_hasBluetooth ? Color{100, 160, 255, 255}
-                                     : Color{60,  60,  80,  255};
+        Color btCol = m_hasBluetooth ? theme.info
+                                     : theme.inactive;
         float bw = m_icons.Measure(Icons::Bluetooth, "B", (float)indSz);
         xCursor -= (int)bw + 16;
         m_icons.Draw(Icons::Bluetooth, "B", (float)xCursor, (float)indY,
                      (float)indSz, btCol);
 
         // WiFi
-        Color wfCol = m_wifiState == 2 ? Color{80, 200,  80, 255}
-                    : m_wifiState == 1 ? Color{220, 180, 40, 255}
-                                       : Color{60,  60,  80, 255};
+        Color wfCol = m_wifiState == 2 ? theme.success
+                    : m_wifiState == 1 ? theme.warning
+                                       : theme.inactive;
         float ww = m_icons.Measure(Icons::Wifi, "W", (float)indSz);
         xCursor -= (int)ww + 16;
         m_icons.Draw(Icons::Wifi, "W", (float)xCursor, (float)indY,
@@ -99,6 +100,6 @@ void StatusBar::Draw(int W, int H) const {
     if (!m_ip.empty()) {
         const char* label = TextFormat("IP: %s", m_ip.c_str());
         const int lw = MeasureText(label, 32);
-        DrawText(label, W - lw - 40, H - 136, 32, Color{100, 180, 100, 255});
+        DrawText(label, W - lw - 40, H - 136, 32, theme.success);
     }
 }

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "icons.h"
+#include "theme.h"
 #include <string>
 
 class StatusBar {
@@ -17,7 +18,7 @@ public:
     void SetDeviceName(const std::string& name) { m_deviceName = name; }
 
     // Draw the status bar. Call after the active screen's Draw().
-    void Draw(int W, int H) const;
+    void Draw(int W, int H, const Theme& theme) const;
 
 private:
     static constexpr float kPollIntervalSec = 5.0f;

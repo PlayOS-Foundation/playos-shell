@@ -39,11 +39,11 @@ src/
     installer_screen.cpp / .h       # moved
 ```
 
-- [ ] Create directories: `src/core/`, `src/ui/`
-- [ ] Move files to their new locations
-- [ ] Update all `#include` paths to match new locations
-- [ ] Update `add_executable` paths in `CMakeLists.txt`
-- [ ] Build and verify: `cmake -B build && cmake --build build`
+- [x] Create directories: `src/core/`, `src/ui/`
+- [x] Move files to their new locations
+- [x] Update all `#include` paths to match new locations
+- [x] Update `add_executable` paths in `CMakeLists.txt`
+- [x] Build and verify: `cmake -B build && cmake --build build`
 
 ### T1.2 — Define `Theme` struct with dark preset
 
@@ -52,15 +52,15 @@ with named colour fields matching every hardcoded colour currently used.
 Provide a static `Theme::Dark()` factory for the default preset (same
 values as the current hardcoded colours — no visual change).
 
-- [ ] Create `src/ui/theme.h` with `Theme` struct
+- [x] Create `src/ui/theme.h` with `Theme` struct
   - Fields: `background`, `surface`, `surfaceBorder`, `accent`, `textPrimary`,
     `textSecondary`, `textMuted`, `selected`, `overlayDim`, `danger`, `success`
   - `static Theme Dark()` returning the current colour values
-- [ ] Create `src/ui/theme.cpp` with `Theme::Dark()` implementation
-- [ ] Declare `extern Theme gTheme` in `theme.h`
-- [ ] Define `Theme gTheme` in `theme.cpp` (initialised to `Theme::Dark()`)
-- [ ] Update `CMakeLists.txt` to include `src/ui/theme.cpp`
-- [ ] Build and verify
+- [x] Create `src/ui/theme.cpp` with `Theme::Dark()` implementation
+- [x] Declare `extern Theme gTheme` in `theme.h`
+- [x] Define `Theme gTheme` in `theme.cpp` (initialised to `Theme::Dark()`)
+- [x] Update `CMakeLists.txt` to include `src/ui/theme.cpp`
+- [x] Build and verify
 
 ### T1.3 — Replace all hardcoded colours with `gTheme`
 
@@ -84,39 +84,38 @@ corresponding `gTheme.*` field. Mappings:
 | `Color{130, 150, 130, 255}` | `gTheme.success` |
 | `Color{40, 40, 70, 255}` | `gTheme.surfaceBorder` |
 
-- [ ] Update `library_screen.cpp` — ClearBackground, selection highlight,
+- [x] Update `library_screen.cpp` — ClearBackground, selection highlight,
   icon placeholder, text colours, scrollbar, status/help lines
-- [ ] Update `overlay_screen.cpp` — dim rectangle, panel, title, menu items,
+- [x] Update `overlay_screen.cpp` — dim rectangle, panel, title, menu items,
   help text
-- [ ] Update `wifi_screen.cpp` — all colours
-- [ ] Update `installer_screen.cpp` — all colours
-- [ ] Update `status_bar.cpp` — all colours
-- [ ] Remove `#include` of theme header from each file
-- [ ] Build and verify — no visual change, just colour source moved
+- [x] Update `wifi_screen.cpp` — all colours
+- [x] Update `installer_screen.cpp` — all colours
+- [x] Update `status_bar.cpp` — all colours
+- [x] Remove `#include` of theme header from each file
+- [x] Build and verify — no visual change, just colour source moved
 
 ### T1.4 — Introduce `AppContext` and pass it to all screens
 
-- [ ] Create `src/app_context.h` with initial struct:
+- [x] Create `src/core/app_context.h` with initial struct:
   ```cpp
   struct AppContext {
       ScreenStack& stack;
+      Theme        theme{Theme::Dark()};
   };
   ```
-- [ ] Change every screen constructor from `(ScreenStack& stack)` to
+- [x] Change every screen constructor from `(ScreenStack& stack)` to
   `(AppContext& ctx)`, store `AppContext& m_ctx`
-- [ ] Update all `m_stack.*` calls to `m_ctx.stack.*`
-- [ ] Update `ShellApp` to create `AppContext m_ctx{m_stack}` and
+- [x] Update all `m_stack.*` calls to `m_ctx.stack.*`
+- [x] Update `ShellApp` to create `AppContext m_ctx{m_stack}` and
   pass `m_ctx` to `LibraryScreen(m_ctx)`
-- [ ] Build and verify
+- [x] Build and verify
 
 ### T1.5 — Add `Theme` to `AppContext`
 
-- [ ] Add `const Theme& theme;` to `AppContext`
-- [ ] `ShellApp` creates `Theme m_theme = Theme::Dark()` and passes it
-  via `AppContext{m_stack, m_theme}`
-- [ ] Screens access theme via `m_ctx.theme.*` instead of `gTheme.*`
-- [ ] Remove `extern Theme gTheme` — theme is now context-scoped
-- [ ] Build and verify
+- [x] Add `Theme theme{Theme::Dark()};` to `AppContext`
+- [x] Screens access theme via `m_ctx.theme.*` instead of `gTheme.*`
+- [x] Remove `extern Theme gTheme` — theme is now context-scoped
+- [x] Build and verify
 
 ---
 

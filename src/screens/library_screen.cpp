@@ -1,6 +1,7 @@
 #include "library_screen.h"
 #include "overlay_screen.h"
 
+#include "../ui/theme.h"
 #include "raylib.h"
 #include "playos/playos.h"
 #include "playos/runtime/process.h"
@@ -85,8 +86,8 @@ static std::vector<GameEntry> BuildLibrary(const fs::path& exeDir) {
 
 // ── LibraryScreen ─────────────────────────────────────────────────────────
 
-LibraryScreen::LibraryScreen(const fs::path& exeDir, ScreenStack& stack)
-    : m_stack(stack), m_library(BuildLibrary(exeDir)) {}
+LibraryScreen::LibraryScreen(const fs::path& exeDir, AppContext& ctx)
+    : m_ctx(ctx), m_library(BuildLibrary(exeDir)) {}
 
 void LibraryScreen::OnEnter() {
     // Nothing needed — keep selection where it was
@@ -99,7 +100,7 @@ void LibraryScreen::Update(float dt) {
     if (PressedDown())
         m_selected = (m_selected + 1) % (int)m_library.size();
     if (PressedHome())
-        m_stack.Push(std::make_unique<OverlayScreen>(m_stack));
+        m_ctx.stack.Push(std::make_unique<OverlayScreen>(m_ctx));
 
     if (!PressedConfirm()) return;
 
@@ -111,7 +112,7 @@ void LibraryScreen::Update(float dt) {
     // Fade-out
     for (int f = 0; f < 30; ++f) {
         BeginDrawing();
-        ClearBackground(Color{8, 8, 12, 255});
+        ClearBackground(m_ctx.theme.background);
         const int alpha = (int)(255.0f * ((float)f / 29.0f));
         DrawText(game.title.c_str(),
                  (W - MeasureText(game.title.c_str(), 36)) / 2,
@@ -124,7 +125,7 @@ void LibraryScreen::Update(float dt) {
     // Fade-in
     for (int f = 0; f < 20; ++f) {
         BeginDrawing();
-        ClearBackground(Color{8, 8, 12, 255});
+        ClearBackground(m_ctx.theme.background);
         EndDrawing();
     }
 
@@ -134,10 +135,10 @@ void LibraryScreen::Update(float dt) {
 }
 
 void LibraryScreen::Draw(int W, int H) {
-    ClearBackground(Color{12, 12, 18, 255});
+    ClearBackground(m_ctx.theme.background);
 
     // Category heading
-    DrawText("LIBRARY", 160, 144, 28, Color{100, 100, 140, 255});
+    DrawText("LIBRARY", 160, 144, 28, m_ctx.theme.textSecondary);
 
     // ── Game list ─────────────────────────────────────────────────────────
     constexpr int kRowH    = 144;
@@ -153,29 +154,29 @@ void LibraryScreen::Draw(int W, int H) {
         if (isSel)
             DrawRectangleRounded({(float)kListLeft, (float)y + 2,
                                   (float)kListW, (float)kRowH - 4},
-                                 0.25f, 8, Color{44, 52, 68, 255});
+                                 0.25f, 8, m_ctx.theme.selected);
 
         DrawRectangleRounded({(float)kListLeft + 24, (float)y + 20,
                               (float)kIconSz, (float)kIconSz},
                              0.2f, 6,
-                             isSel ? Color{64, 130, 220, 255} : Color{32, 34, 44, 255});
+                             isSel ? m_ctx.theme.accent : m_ctx.theme.surfaceButton);
 
         DrawText(m_library[i].title.c_str(), kListLeft + kIconSz + 48,
-                 y + 20, 52, isSel ? RAYWHITE : Color{200, 200, 210, 255});
+                 y + 20, 52, isSel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary);
         DrawText(m_library[i].subtitle.c_str(), kListLeft + kIconSz + 48,
-                 y + 84, 32, Color{120, 120, 140, 255});
+                 y + 84, 32, m_ctx.theme.textSecondary);
     }
 
     // Scrollbar hint
     if (m_library.size() > 1) {
         const float thumbY = (float)(kListTop + m_selected * kRowH);
         DrawRectangle(kListLeft + kListW + 16, (int)thumbY, 4, kRowH,
-                      Color{60, 60, 80, 255});
+                      m_ctx.theme.inactive);
     }
 
     // Status / help line
     if (!m_status.empty())
-        DrawText(m_status.c_str(), 160, H - 144, 36, Color{130, 150, 130, 255});
+        DrawText(m_status.c_str(), 160, H - 144, 36, m_ctx.theme.success);
     DrawText("Navigate: D-Pad /   Launch: A   \xe2\x80\x94   Home: overlay",
-             160, H - 84, 32, Color{80, 80, 100, 255});
+             160, H - 84, 32, m_ctx.theme.textMuted);
 }
