@@ -1,5 +1,7 @@
 # AGENTS.md — playos-shell
 
+> **⚠️ FIRST:** Read [`gen-context.md`](gen-context.md) before anything else to understand the full PlayOS platform context.
+
 Guidance for AI agents and contributors working in this repository.
 
 ## What this repository is

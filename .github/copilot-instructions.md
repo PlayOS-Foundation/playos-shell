@@ -1,3 +1,4 @@
+> **⚠️ FIRST:** Read [`gen-context.md`](../gen-context.md) before anything else to understand the full PlayOS platform context.
 # Copilot instructions — playos-shell
 
 Reference **PlayOS Shell**: the controller-first console UI built with Raylib.
