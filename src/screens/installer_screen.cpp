@@ -1,5 +1,6 @@
 #include "installer_screen.h"
 
+#include "../ui/theme.h"
 #include "raylib.h"
 #include "playos/playos.h"
 #include <cstdio>
@@ -231,7 +232,7 @@ void InstallerScreen::StartInstall() {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-InstallerScreen::InstallerScreen(ScreenStack& stack) : m_stack(stack) {}
+InstallerScreen::InstallerScreen(AppContext& ctx) : m_ctx(ctx) {}
 
 void InstallerScreen::OnEnter() {
     DetectDisk();
@@ -306,13 +307,13 @@ void InstallerScreen::Update(float dt) {
 
     if (PressedUp())        m_selected = 0;
     if (PressedDown())      m_selected = 1;
-    if (PressedBack())      { m_stack.Pop(); return; }
+    if (PressedBack())      { m_ctx.stack.Pop(); return; }
 
     if (PressedConfirm()) {
         if (m_selected == 0 && !m_diskPath.empty()) {
             StartInstall();
         } else {
-            m_stack.Pop();
+            m_ctx.stack.Pop();
         }
     }
 }
@@ -320,7 +321,7 @@ void InstallerScreen::Update(float dt) {
 // ── Draw ─────────────────────────────────────────────────────────────────────
 
 void InstallerScreen::Draw(int W, int H) {
-    DrawRectangle(0, 0, W, H, Color{0, 0, 0, 200});
+    DrawRectangle(0, 0, W, H, m_ctx.theme.overlayDim);
 
     // ── Progress states ─────────────────────────────────────────────────────
     if (m_installing && (m_step == Step::WritingImage ||
@@ -350,13 +351,13 @@ void InstallerScreen::Draw(int W, int H) {
         }
 
         int tw = MeasureText(stageLabel, 32);
-        DrawText(stageLabel, (W - tw) / 2, barY - 60, 32, RAYWHITE);
+        DrawText(stageLabel, (W - tw) / 2, barY - 60, 32, m_ctx.theme.textPrimary);
 
         tw = MeasureText(m_diskPath.c_str(), 22);
-        DrawText(m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, Color{140, 140, 180, 255});
+        DrawText(m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, m_ctx.theme.textSecondary);
 
-        DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, Color{30, 30, 50, 255});
-        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 2.0f, Color{60, 60, 100, 255});
+        DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.surfaceInput);
+        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.border);
 
         float drawProgress = m_stepProgress;
         if (m_step > Step::WritingImage) {
@@ -366,12 +367,12 @@ void InstallerScreen::Draw(int W, int H) {
             float fillW = (float)barW * drawProgress - 4.0f;
             if (fillW < 0.0f) fillW = 0.0f;
             DrawRectangleRounded({(float)barX + 2, (float)barY + 2, fillW, (float)barH - 4},
-                                 0.3f, 8, Color{80, 140, 240, 255});
+                                 0.3f, 8, m_ctx.theme.accent);
 
             int pct = (int)(drawProgress * 100.0f);
             const char* pctText = TextFormat("%d%%", pct);
             tw = MeasureText(pctText, 24);
-            DrawText(pctText, barX + barW / 2 - tw / 2, barY + 8, 24, RAYWHITE);
+            DrawText(pctText, barX + barW / 2 - tw / 2, barY + 8, 24, m_ctx.theme.textPrimary);
         }
         return;
     }
@@ -382,36 +383,36 @@ void InstallerScreen::Draw(int W, int H) {
         const int px = (W - panW) / 2, py = (H - panH) / 2;
 
         DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
-                             0.1f, 12, Color{18, 18, 28, 255});
+                             0.1f, 12, m_ctx.theme.surface);
         DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                                   0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+                                   0.1f, 12, m_ctx.theme.border);
 
         DrawText("INSTALLATION COMPLETE",
                  W / 2 - MeasureText("INSTALLATION COMPLETE", 40) / 2,
-                 py + 40, 40, Color{80, 220, 120, 255});
+                 py + 40, 40, m_ctx.theme.success);
 
         DrawText("PlayOS has been written to disk successfully.",
                  W / 2 - MeasureText("PlayOS has been written to disk successfully.", 22) / 2,
-                 py + 100, 22, Color{180, 180, 200, 255});
+                 py + 100, 22, m_ctx.theme.textPrimary);
         DrawText("Remove the PXE / installation media before rebooting.",
                  W / 2 - MeasureText("Remove the PXE / installation media before rebooting.", 20) / 2,
-                 py + 130, 20, Color{140, 140, 160, 255});
+                 py + 130, 20, m_ctx.theme.textSecondary);
 
         int by = py + panH - 100;
 
-        Color rebBg = (m_rebootSelected == 0) ? Color{200, 40, 40, 255} : Color{60, 20, 20, 255};
+        Color rebBg = (m_rebootSelected == 0) ? m_ctx.theme.danger : m_ctx.theme.surfaceButton;
         DrawRectangleRounded({(float)(px + 40), (float)by, 260.0f, 56.0f}, 0.3f, 8, rebBg);
         DrawText("Reboot Now", px + 60, by + 12, 28,
-                 (m_rebootSelected == 0) ? RAYWHITE : Color{140, 80, 80, 255});
+                 (m_rebootSelected == 0) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
-        Color stayBg = (m_rebootSelected == 1) ? Color{40, 40, 60, 255} : Color{25, 25, 40, 255};
+        Color stayBg = (m_rebootSelected == 1) ? m_ctx.theme.separator : m_ctx.theme.surfaceButton;
         DrawRectangleRounded({(float)(px + 340), (float)by, 260.0f, 56.0f}, 0.3f, 8, stayBg);
         DrawText("Stay in Shell", px + 360, by + 12, 28,
-                 (m_rebootSelected == 1) ? RAYWHITE : Color{100, 100, 130, 255});
+                 (m_rebootSelected == 1) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
         DrawText("[Up/Down] Choose    [Enter] Confirm",
                  W / 2 - MeasureText("[Up/Down] Choose    [Enter] Confirm", 20) / 2,
-                 py + panH - 28, 20, Color{80, 80, 100, 255});
+                 py + panH - 28, 20, m_ctx.theme.textMuted);
         return;
     }
 
@@ -419,24 +420,24 @@ void InstallerScreen::Draw(int W, int H) {
     if (m_installing && m_step == Step::Failed) {
         DrawText("INSTALLATION FAILED",
                  W / 2 - MeasureText("INSTALLATION FAILED", 40) / 2,
-                 H / 2 - 80, 40, Color{255, 80, 80, 255});
+                 H / 2 - 80, 40, m_ctx.theme.danger);
 
         int y = H / 2 - 20;
         std::istringstream errs(m_errorMsg);
         std::string errLine;
         while (std::getline(errs, errLine)) {
             int tw = MeasureText(errLine.c_str(), 20);
-            DrawText(errLine.c_str(), (W - tw) / 2, y, 20, Color{200, 140, 140, 255});
+            DrawText(errLine.c_str(), (W - tw) / 2, y, 20, m_ctx.theme.danger);
             y += 26;
         }
 
         DrawText("Press ENTER or ESC to dismiss",
                  W / 2 - MeasureText("Press ENTER or ESC to dismiss", 22) / 2,
-                 H / 2 + 100, 22, Color{180, 180, 200, 255});
+                 H / 2 + 100, 22, m_ctx.theme.textPrimary);
 
         if (PressedConfirm() || PressedBack()) {
             CleanupChild();
-            m_stack.Pop();
+            m_ctx.stack.Pop();
         }
         return;
     }
@@ -446,47 +447,47 @@ void InstallerScreen::Draw(int W, int H) {
     const int px = (W - panW) / 2, py = (H - panH) / 2;
 
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
-                         0.1f, 12, Color{18, 18, 28, 255});
+                         0.1f, 12, m_ctx.theme.surface);
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                               0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+                               0.1f, 12, m_ctx.theme.border);
 
-    DrawText("INSTALL TO DISK", px + 40, py + 36, 48, Color{220, 80, 80, 255});
-    DrawRectangle(px + 40, py + 100, panW - 80, 2, Color{40, 40, 70, 255});
+    DrawText("INSTALL TO DISK", px + 40, py + 36, 48, m_ctx.theme.danger);
+    DrawRectangle(px + 40, py + 100, panW - 80, 2, m_ctx.theme.separator);
 
     DrawText("WARNING: This will ERASE ALL DATA on the target disk.",
-             px + 40, py + 130, 24, Color{255, 140, 60, 255});
+             px + 40, py + 130, 24, m_ctx.theme.warning);
     DrawText("There is NO undo. Make sure you have backups.",
-             px + 40, py + 162, 22, Color{180, 100, 40, 255});
+             px + 40, py + 162, 22, m_ctx.theme.warning);
 
-    DrawText("Target disk:", px + 40, py + 210, 28, Color{140, 140, 180, 255});
+    DrawText("Target disk:", px + 40, py + 210, 28, m_ctx.theme.textSecondary);
     DrawText(TextFormat("%s  (%s)", m_diskPath.c_str(), m_diskSize.c_str()),
-             px + 40, py + 248, 36, RAYWHITE);
+             px + 40, py + 248, 36, m_ctx.theme.textPrimary);
 
     if (!m_diskPath.empty() && !m_imagePath.empty()) {
         DrawText(TextFormat("Image: %s", m_imagePath.c_str()),
-                 px + 40, py + 300, 22, Color{100, 160, 100, 255});
+                 px + 40, py + 300, 22, m_ctx.theme.success);
     } else if (!m_diskPath.empty()) {
         DrawText("No disk image found. Place playos-gpt-*.img.zst on USB.",
-                 px + 40, py + 300, 22, Color{255, 140, 60, 255});
+                 px + 40, py + 300, 22, m_ctx.theme.warning);
     }
 
     if (m_diskPath.empty()) {
         DrawText("No internal disk detected.",
-                 px + 40, py + 300, 24, Color{255, 80, 80, 255});
+                 px + 40, py + 300, 24, m_ctx.theme.danger);
     }
 
     int by = py + panH - 120;
 
-    Color confBg = (m_selected == 0) ? Color{200, 40, 40, 255} : Color{60, 20, 20, 255};
+    Color confBg = (m_selected == 0) ? m_ctx.theme.danger : m_ctx.theme.surfaceButton;
     DrawRectangleRounded({(float)(px + 40), (float)by, 320.0f, 64.0f}, 0.3f, 8, confBg);
     DrawText("ERASE & INSTALL", px + 60, by + 16, 30,
-             (m_selected == 0) ? RAYWHITE : Color{140, 80, 80, 255});
+             (m_selected == 0) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
-    Color cancBg = (m_selected == 1) ? Color{40, 40, 60, 255} : Color{25, 25, 40, 255};
+    Color cancBg = (m_selected == 1) ? m_ctx.theme.separator : m_ctx.theme.surfaceButton;
     DrawRectangleRounded({(float)(px + 400), (float)by, 320.0f, 64.0f}, 0.3f, 8, cancBg);
     DrawText("CANCEL", px + 420, by + 16, 30,
-             (m_selected == 1) ? RAYWHITE : Color{100, 100, 130, 255});
+             (m_selected == 1) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
     DrawText("[Up/Down] Choose    [Enter] Confirm    [Esc/B] Back",
-             px + 40, py + panH - 38, 20, Color{80, 80, 100, 255});
+             px + 40, py + panH - 38, 20, m_ctx.theme.textMuted);
 }

@@ -2,15 +2,15 @@
 // Browse available WiFi networks and connect with optional password entry.
 #pragma once
 
-#include "../screen.h"
-#include "../screen_stack.h"
+#include "../core/screen.h"
+#include "../core/app_context.h"
 #include "playos/network.h"
 #include <string>
 #include <vector>
 
 class WiFiScreen : public IScreen {
 public:
-    explicit WiFiScreen(ScreenStack& stack);
+    explicit WiFiScreen(AppContext& ctx);
 
     void OnEnter() override;
     void Update(float dt) override;
@@ -25,7 +25,7 @@ private:
         Result,      // success / failure message
     };
 
-    ScreenStack& m_stack;
+    AppContext& m_ctx;
     State m_state = State::Scanning;
 
     // Network list

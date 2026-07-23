@@ -81,7 +81,7 @@ int ShellApp::Run(int argc, char** argv) {
 
     // Push the default screen
     TraceLog(LOG_INFO, "PLAYOS-SHELL: Creating LibraryScreen...");
-    m_stack.Push(std::make_unique<LibraryScreen>(exeDir, m_stack));
+    m_stack.Push(std::make_unique<LibraryScreen>(exeDir, m_ctx));
     TraceLog(LOG_INFO, "PLAYOS-SHELL: LibraryScreen created, entering main loop");
 
     while (!WindowShouldClose() && !m_stack.Empty()) {
@@ -93,7 +93,7 @@ int ShellApp::Run(int argc, char** argv) {
 
         BeginDrawing();
         m_stack.Draw(W, H);
-        m_statusBar.Draw(W, H);
+        m_statusBar.Draw(W, H, m_ctx.theme);
         EndDrawing();
     }
 

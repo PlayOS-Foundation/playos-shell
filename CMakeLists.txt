@@ -66,9 +66,10 @@ playos_add_dependency(playos-runtime)
 add_executable(playos-shell
     src/main.cpp
     src/shell_app.cpp
-    src/screen_stack.cpp
-    src/icons.cpp
-    src/status_bar.cpp
+    src/core/screen_stack.cpp
+    src/ui/theme.cpp
+    src/ui/icons.cpp
+    src/ui/status_bar.cpp
     src/screens/library_screen.cpp
     src/screens/overlay_screen.cpp
     src/screens/wifi_screen.cpp

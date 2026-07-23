@@ -1,5 +1,6 @@
 #include "wifi_screen.h"
 
+#include "../ui/theme.h"
 #include "raylib.h"
 #include "playos/playos.h"
 
@@ -66,7 +67,7 @@ void WiFiScreen::AppendTypedChar() {
 
 // ── WiFiScreen ────────────────────────────────────────────────────────────
 
-WiFiScreen::WiFiScreen(ScreenStack& stack) : m_stack(stack) {}
+WiFiScreen::WiFiScreen(AppContext& ctx) : m_ctx(ctx) {}
 
 void WiFiScreen::OnEnter() {
     m_state   = State::Scanning;
@@ -84,7 +85,7 @@ void WiFiScreen::Update(float dt) {
 
     // ── List: navigate, connect, rescan, back ──────────────────────────────
     case State::List:
-        if (NavBack()) { m_stack.Pop(); return; }
+        if (NavBack()) { m_ctx.stack.Pop(); return; }
         if (!m_networks.empty()) {
             if (NavUp())
                 m_selected = std::max(0, m_selected - 1);
@@ -147,19 +148,19 @@ void WiFiScreen::Update(float dt) {
 }
 
 void WiFiScreen::Draw(int W, int H) {
-    ClearBackground(Color{12, 12, 18, 255});
+    ClearBackground(m_ctx.theme.background);
 
     // Header
-    DrawText("WiFi", 160, 100, 52, Color{180, 180, 220, 255});
-    DrawText("[B] Back    [X] Rescan", W - 500, 108, 28, Color{80, 80, 100, 255});
-    DrawRectangle(0, 160, W, 2, Color{40, 40, 60, 255});
+    DrawText("WiFi", 160, 100, 52, m_ctx.theme.textPrimary);
+    DrawText("[B] Back    [X] Rescan", W - 500, 108, 28, m_ctx.theme.textMuted);
+    DrawRectangle(0, 160, W, 2, m_ctx.theme.separator);
 
     switch (m_state) {
     // ── Scanning ──────────────────────────────────────────────────────────
     case State::Scanning: {
         const char* msg = "Scanning for networks...";
         DrawText(msg, (W - MeasureText(msg, 40)) / 2, H / 2 - 20, 40,
-                 Color{140, 140, 180, 255});
+                 m_ctx.theme.textSecondary);
         break;
     }
 
@@ -168,7 +169,7 @@ void WiFiScreen::Draw(int W, int H) {
         if (m_networks.empty()) {
             const char* msg = "No networks found.  Press X to rescan.";
             DrawText(msg, (W - MeasureText(msg, 36)) / 2, H / 2 - 18, 36,
-                     Color{120, 120, 140, 255});
+                     m_ctx.theme.textSecondary);
             break;
         }
 
@@ -192,16 +193,16 @@ void WiFiScreen::Draw(int W, int H) {
             if (sel)
                 DrawRectangleRounded({(float)kLeft, (float)y + 4,
                                       (float)(W - 2 * kLeft), (float)kRowH - 8},
-                                     0.2f, 8, Color{44, 52, 68, 255});
+                                     0.2f, 8, m_ctx.theme.selected);
 
             // SSID
-            Color nameCol = sel ? RAYWHITE : Color{200, 200, 210, 255};
-            if (n.active) nameCol = Color{80, 200, 80, 255};
+            Color nameCol = sel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary;
+            if (n.active) nameCol = m_ctx.theme.success;
             DrawText(n.ssid.c_str(), kLeft + 20, y + 24, 36, nameCol);
 
             // Lock icon or "open"
             const char* secLabel = n.secured ? "secured" : "open";
-            DrawText(secLabel, kLeft + 20, y + 66, 22, Color{100, 100, 120, 255});
+            DrawText(secLabel, kLeft + 20, y + 66, 22, m_ctx.theme.textMuted);
 
             // Signal bars
             DrawSignalBars(W - kLeft - 100, y + 20, n.signal, n.active);
@@ -209,7 +210,7 @@ void WiFiScreen::Draw(int W, int H) {
 
         // Help
         DrawText("[A] Connect    [X] Rescan",
-                 160, H - 70, 28, Color{80, 80, 100, 255});
+                 160, H - 70, 28, m_ctx.theme.textMuted);
         break;
     }
 
@@ -217,25 +218,25 @@ void WiFiScreen::Draw(int W, int H) {
     case State::EnterPass: {
         const auto& n = m_networks[m_selected];
         DrawText(TextFormat("Password for \"%s\":", n.ssid.c_str()),
-                 160, H / 2 - 120, 36, Color{180, 180, 220, 255});
+                 160, H / 2 - 120, 36, m_ctx.theme.textPrimary);
 
         // Password field
         DrawRectangleRounded({(float)(W / 2 - 400), (float)(H / 2 - 40),
                                800.0f, 80.0f},
-                             0.2f, 8, Color{30, 30, 50, 255});
+                             0.2f, 8, m_ctx.theme.surfaceInput);
         DrawRectangleRoundedLines({(float)(W / 2 - 400), (float)(H / 2 - 40),
                                    800.0f, 80.0f},
-                                  0.2f, 8, 2.0f, Color{80, 80, 140, 255});
+                                  0.2f, 8, m_ctx.theme.border);
 
         // Show masked or clear text
         std::string display = m_passVisible ? m_password
                             : std::string(m_password.size(), '*');
         display += (int)(GetTime() * 2) % 2 ? "|" : " "; // cursor blink
         DrawText(display.c_str(), W / 2 - 380, H / 2 - 20, 36,
-                 Color{220, 220, 240, 255});
+                 m_ctx.theme.textPrimary);
 
         DrawText("[Enter] Connect    [Esc] Cancel    [Tab] Show/hide",
-                 160, H / 2 + 80, 26, Color{80, 80, 100, 255});
+                 160, H / 2 + 80, 26, m_ctx.theme.textMuted);
 
         if (IsKeyPressed(KEY_TAB)) m_passVisible = !m_passVisible;
         break;
@@ -246,14 +247,14 @@ void WiFiScreen::Draw(int W, int H) {
         const auto& n = m_networks[m_selected];
         const char* msg = TextFormat("Connecting to \"%s\"...", n.ssid.c_str());
         DrawText(msg, (W - MeasureText(msg, 36)) / 2, H / 2 - 18, 36,
-                 Color{140, 140, 200, 255});
+                 m_ctx.theme.textSecondary);
         break;
     }
 
     // ── Result ────────────────────────────────────────────────────────────
     case State::Result: {
         Color col = (m_resultMsg.find("Connected") != std::string::npos)
-                  ? Color{80, 200, 80, 255} : Color{220, 80, 80, 255};
+                  ? m_ctx.theme.success : m_ctx.theme.danger;
         DrawText(m_resultMsg.c_str(),
                  (W - MeasureText(m_resultMsg.c_str(), 40)) / 2,
                  H / 2 - 20, 40, col);
@@ -267,8 +268,8 @@ void WiFiScreen::DrawSignalBars(int x, int y, int signal, bool active) const {
     const int barW = 14, gap = 6;
     const int bars = signal >= 75 ? 4 : signal >= 50 ? 3
                    : signal >= 25 ? 2 : signal > 0 ? 1 : 0;
-    Color onCol  = active ? Color{80, 200, 80, 255} : Color{100, 140, 220, 255};
-    Color offCol = Color{40, 40, 60, 255};
+    Color onCol  = active ? m_ctx.theme.success : m_ctx.theme.info;
+    Color offCol = m_ctx.theme.separator;
     for (int b = 0; b < 4; ++b) {
         const int bh = 10 + b * 10;
         Color c = (b < bars) ? onCol : offCol;

@@ -1,20 +1,20 @@
 #pragma once
 
-#include "../screen.h"
-#include "../screen_stack.h"
+#include "../core/screen.h"
+#include "../core/app_context.h"
 #include <string>
 #include <sys/types.h>
 
 class InstallerScreen : public IScreen {
 public:
-    explicit InstallerScreen(ScreenStack& stack);
+    explicit InstallerScreen(AppContext& ctx);
 
     void OnEnter() override;
     void Update(float dt) override;
     void Draw(int W, int H) override;
 
 private:
-    ScreenStack& m_stack;
+    AppContext& m_ctx;
     int m_selected = 1;        // 0 = Confirm, 1 = Cancel (default Cancel for safety)
     bool m_installing = false;
     float m_installTimer = 0.0f;

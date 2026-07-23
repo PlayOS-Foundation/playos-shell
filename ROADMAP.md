@@ -137,15 +137,68 @@ OS-specific code in the shell itself.
 
 ## 📋 Planned — Phase 5 (Polish)
 
-### UX improvements
-- [ ] Status bar poll interval (every 5 s, not every frame)
-- [ ] Animated transitions between screens (slide / fade)
-- [ ] Game cover art in library list (loaded from package)
-- [ ] Search / filter in library
-- [ ] Recently played / quick-resume section
-- [ ] Notification toast system (download complete, update available, etc.)
-- [ ] Theme / accent colour (user-configurable)
-- [ ] Accessibility: larger text mode, high contrast
+> **Goal:** Console-grade feel — sound, motion, personality. Every item here
+> makes the shell *feel* like a real device rather than a dev tool.
+
+### Visuals & cover art
+- [ ] **Game cover art** in library list — loaded from `.gpk` package or
+  `/data/games/<id>/cover.png`, displayed as thumbnail next to each title
+- [ ] **Library background** — subtle animated gradient or slow particle field
+  behind the game list (replaces flat black, makes the shell feel alive)
+
+### Screen transitions
+- [ ] **Animated transitions** between screens — push = slide-from-right,
+  pop = slide-to-right, 200 ms with `easeOutCubic` easing. `ScreenStack`
+  manages transition state, renders both outgoing and incoming screens during
+  the animation.
+- [ ] **Loading spinner** — 12-frame arc animation (`DrawSpinner(x, y, r, color)`)
+  shown in any screen during operations >500 ms (WiFi scan, connecting,
+  installing). Reusable helper in `src/spinner.cpp`.
+
+### UI sound system
+- [ ] **`AudioManager`** — lightweight singleton that plays short WAV/OGG
+  samples from `/usr/share/playos/sounds/`. Menu move (tick), confirm (click),
+  back (cancel), overlay open (whoosh), game launch (swoosh), notification
+  (chime), error (buzz). Volume respects `PlayOS::Audio::GetVolume()`.
+  Toggle: "UI Sounds: ON/OFF" in overlay.
+  Uses Raylib's `LoadSound`/`PlaySound` (already linked via
+  `PlayOS::playos-audio-raylib`). ~150 lines in `src/audio_manager.cpp`.
+
+### Theme system
+- [ ] **Theme struct** — replace hardcoded `Color{18, 18, 28, 255}` with a
+  `Theme` struct: `background, surface, surfaceBorder, accent, accentDim,
+  textPrimary, textSecondary, textMuted, selected, danger, success, overlayDim`.
+  A `gTheme` global owned by `ShellApp`, passed to every screen.
+- [ ] **Dark + Light presets** — load from TOML at
+  `/usr/share/playos/themes/dark.toml` and `light.toml`. Dark is default.
+- [ ] **Theme toggle** in overlay: Home → Theme → Dark/Light.
+- [ ] **Custom themes** — third-party themes loaded from
+  `/usr/share/playos/themes/` (user-installed `.toml` files).
+
+### Notification toasts
+- [ ] **Toast queue** — non-blocking overlays sliding in from top-right, auto-dismiss
+  after 3 s. Types: info, success, warning, error (colored left border).
+  Stacked vertically when multiple queued.
+  API: `m_toasts.Show("WiFi Connected", ToastType::Success);`.
+  Used for: download complete, update available, controller disconnected,
+  achievement unlock, error messages.
+
+### Haptic feedback
+- [ ] **Gamepad rumble** — short pulses via `PlayOS::Input` rumble API
+  (if the device profile reports rumble support). D-Pad move: 20 ms light,
+  confirm: 40 ms medium, back: 30 ms light, error: 50 ms sharp.
+  Skipped silently on keyboard/VM. Toggle in overlay.
+
+### Idle & power saving
+- [ ] **Idle screen dim** — after 60 s of no input on `LibraryScreen`,
+  gradually dim to 70 % brightness (prevents OLED burn-in on ROG Ally).
+  Restore on any input. Resets on screen push/pop.
+
+### Library features
+- [ ] Search / filter in library (text input via on-screen keyboard or physical
+  keyboard)
+- [ ] Recently played / quick-resume section at top of library list
+- [ ] Accessibility: larger text mode, high contrast toggle
 
 ---
 
@@ -155,7 +208,8 @@ OS-specific code in the shell itself.
 - Parental controls (per-game time limits, rating filter)
 - Remote Play indicator (stream a game to another device)
 - Performance overlay (FPS, temps) via Home button shortcut
-- Custom shell themes (third-party, loaded from `/usr/share/playos/themes/`)
+- Startup boot animation / splash screen
+- Welcome wizard on first boot (WiFi, hostname, timezone, user account)
 - Alternative shell support (the shell is a replaceable Wayland client)
 
 ---

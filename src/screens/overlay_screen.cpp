@@ -2,6 +2,7 @@
 #include "wifi_screen.h"
 #include "installer_screen.h"
 
+#include "../ui/theme.h"
 #include "raylib.h"
 #include "playos/playos.h"
 #include <cstdlib>
@@ -15,37 +16,37 @@ static bool OvConfirm() { return PlayOS::Input::Pressed(PlayOS::Button::A)      
 static bool OvBack()    { return PlayOS::Input::Pressed(PlayOS::Button::B)        || IsKeyPressed(KEY_ESCAPE)
                               || PlayOS::Input::Pressed(PlayOS::Button::Home); }
 
-OverlayScreen::OverlayScreen(ScreenStack& stack) : m_stack(stack) {}
+OverlayScreen::OverlayScreen(AppContext& ctx) : m_ctx(ctx) {}
 
 void OverlayScreen::Update(float dt) {
     (void)dt;
-    if (OvBack())    { m_stack.Pop(); return; }
+    if (OvBack())    { m_ctx.stack.Pop(); return; }
     if (OvUp())      m_selected = std::max(0, m_selected - 1);
     if (OvDown())    m_selected = std::min(kItemCount - 1, m_selected + 1);
     if (OvConfirm()) {
         switch (m_selected) {
-        case 0: m_stack.Push(std::make_unique<WiFiScreen>(m_stack)); break;
-        case 1: m_stack.Push(std::make_unique<InstallerScreen>(m_stack)); break;
-        case 2: m_stack.Pop(); break;
+        case 0: m_ctx.stack.Push(std::make_unique<WiFiScreen>(m_ctx)); break;
+        case 1: m_ctx.stack.Push(std::make_unique<InstallerScreen>(m_ctx)); break;
+        case 2: m_ctx.stack.Pop(); break;
         }
     }
 }
 
 void OverlayScreen::Draw(int W, int H) {
     // Dim
-    DrawRectangle(0, 0, W, H, Color{0, 0, 0, 180});
+    DrawRectangle(0, 0, W, H, m_ctx.theme.overlayDim);
 
     // Panel
     const int panW = 700, panH = 500;
     const int px = (W - panW) / 2, py = (H - panH) / 2;
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
-                         0.1f, 12, Color{18, 18, 28, 255});
+                         0.1f, 12, m_ctx.theme.surface);
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                               0.1f, 12, 2.0f, Color{60, 60, 100, 255});
+                               0.1f, 12, m_ctx.theme.border);
 
     // Title
-    DrawText("SYSTEM", px + 40, py + 36, 52, Color{180, 180, 220, 255});
-    DrawRectangle(px + 40, py + 100, panW - 80, 2, Color{40, 40, 70, 255});
+    DrawText("SYSTEM", px + 40, py + 36, 52, m_ctx.theme.textPrimary);
+    DrawRectangle(px + 40, py + 100, panW - 80, 2, m_ctx.theme.separator);
 
     // Menu items
     for (int i = 0; i < kItemCount; ++i) {
@@ -54,20 +55,20 @@ void OverlayScreen::Draw(int W, int H) {
         if (sel)
             DrawRectangleRounded({(float)(px + 30), (float)(iy - 8),
                                    (float)(panW - 60), 90.0f},
-                                  0.2f, 8, Color{44, 52, 80, 255});
+                                  0.2f, 8, m_ctx.theme.selected);
         DrawText(kItems[i].label, px + 60, iy + 4, 36,
-                 sel ? RAYWHITE : Color{160, 160, 180, 255});
+                 sel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary);
         DrawText(kItems[i].hint, px + 60, iy + 48, 22,
-                 Color{80, 80, 100, 255});
+                 m_ctx.theme.textMuted);
     }
 
     // Help
     DrawText("[A] Select    [B] / [Home] Close",
-             px + 40, py + panH - 54, 24, Color{80, 80, 100, 255});
+             px + 40, py + panH - 54, 24, m_ctx.theme.textMuted);
 
     // Storage info (bottom)
     DrawText(TextFormat("Saves: %s",  PlayOS::Storage::SavePath()),
-             80, H - 160, 24, Color{60, 60, 90, 255});
+             80, H - 160, 24, m_ctx.theme.textMuted);
     DrawText(TextFormat("Config: %s", PlayOS::Storage::ConfigPath()),
-             80, H - 124, 24, Color{60, 60, 90, 255});
+             80, H - 124, 24, m_ctx.theme.textMuted);
 }
