@@ -132,16 +132,6 @@ void InstallerScreen::RunWriteStep() {
     std::string cmd = "zstd -d < \"" + m_imagePath + "\" | dd of=" + m_diskPath
                     + " bs=4M status=progress 2>" + kProgressFile;
 
-    // Get uncompressed size
-    FILE* sizeCheck = popen(("zstd -l \"" + m_imagePath + "\" 2>/dev/null | tail -1 | awk '{print $5}'").c_str(), "r");
-    if (sizeCheck) {
-        char buf[64] = {};
-        if (fgets(buf, sizeof(buf), sizeCheck)) {
-            try { m_totalBytes = std::stoll(buf); } catch (...) { m_totalBytes = 0; }
-        }
-        pclose(sizeCheck);
-    }
-
     m_childPid = fork();
     if (m_childPid == 0) {
         execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
@@ -161,21 +151,23 @@ void InstallerScreen::RunPartitionSteps() {
         return;
     }
     case Step::ResizingPartition: {
-        int rc = std::system(("parted -s " + m_diskPath + " resizepart 2 100%").c_str());
-        if (rc != 0) { m_errorMsg = "Failed to resize partition"; m_step = Step::Failed; return; }
+        // Grow the data partition (p3) to fill remaining space after OS image.
+        int rc = std::system(("parted -s " + m_diskPath + " resizepart 3 100%").c_str());
+        if (rc != 0) { m_errorMsg = "Failed to resize data partition"; m_step = Step::Failed; return; }
         m_step = Step::ResizingFS;
         m_stepProgress = 0.5f;
         return;
     }
     case Step::ResizingFS: {
-        std::string part2 = m_diskPath;
+        std::string part3 = m_diskPath;
         if (m_diskPath.find("nvme") != std::string::npos ||
             m_diskPath.find("mmcblk") != std::string::npos) {
-            part2 += "p2";
+            part3 += "p3";
         } else {
-            part2 += "2";
+            part3 += "3";
         }
-        std::system(("resize2fs -p " + part2).c_str());
+        int rc = std::system(("resize2fs -p " + part3).c_str());
+        if (rc != 0) { m_errorMsg = "Failed to resize data filesystem"; m_step = Step::Failed; return; }
         m_step = Step::Rebooting;
         m_stepProgress = 1.0f;
         return;
@@ -194,13 +186,42 @@ void InstallerScreen::StartInstall() {
         return;
     }
 
+    // Get uncompressed size from zstd header (for progress + size check)
+    m_totalBytes = 0;
+    std::string zsizeCmd = "zstd -l \"" + m_imagePath + "\" 2>/dev/null | tail -1 | awk '{print $5}'";
+    FILE* sizeCheck = popen(zsizeCmd.c_str(), "r");
+    if (sizeCheck) {
+        char buf[64] = {};
+        if (fgets(buf, sizeof(buf), sizeCheck)) {
+            try { m_totalBytes = std::stoll(buf); } catch (...) { m_totalBytes = 0; }
+        }
+        pclose(sizeCheck);
+    }
+
+    // Validate target disk is large enough
+    if (m_totalBytes > 0) {
+        std::string sizePath = "/sys/block/" + m_diskName + "/size";
+        std::ifstream sz(sizePath);
+        if (sz.is_open()) {
+            unsigned long long sectors = 0;
+            sz >> sectors;
+            unsigned long long diskBytes = sectors * 512ULL;
+            if (diskBytes < (unsigned long long)m_totalBytes) {
+                m_step = Step::Failed;
+                m_errorMsg = "Target disk is too small.\nRequired: " + std::to_string(m_totalBytes / (1024*1024*1024))
+                           + " GiB, Available: " + std::to_string(diskBytes / (1024*1024*1024)) + " GiB";
+                m_installing = true;
+                return;
+            }
+        }
+    }
+
     m_installing = true;
     m_installTimer = 0.0f;
     m_completeTimer = 0.0f;
     m_step = Step::WritingImage;
     m_stepProgress = 0.0f;
     m_bytesWritten = 0;
-    m_totalBytes = 0;
 
     std::ofstream pf(kProgressFile, std::ios::trunc);
     pf.close();
@@ -323,9 +344,9 @@ void InstallerScreen::Draw(int W, int H) {
         } else if (m_step == Step::RelocatingGPT) {
             stageLabel = "Updating partition table...";
         } else if (m_step == Step::ResizingPartition) {
-            stageLabel = "Expanding root partition...";
+            stageLabel = "Expanding data partition...";
         } else if (m_step == Step::ResizingFS) {
-            stageLabel = "Growing filesystem...";
+            stageLabel = "Growing data filesystem...";
         }
 
         int tw = MeasureText(stageLabel, 32);

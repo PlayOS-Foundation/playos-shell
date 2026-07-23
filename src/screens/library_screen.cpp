@@ -45,6 +45,27 @@ static std::string FindSample(const fs::path& exeDir, const std::string& name) {
     return {};
 }
 
+// Scan a directory for executable games and add them to the library.
+static void ScanGameDir(const fs::path& dir, std::vector<GameEntry>& games) {
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec)) return;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file(ec)) continue;
+        const auto& p = entry.path();
+        // Skip non-executables and known metadata files
+        const auto perms = fs::status(p, ec).permissions();
+        if (ec) continue;
+        const bool exec = (perms & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
+        if (!exec) continue;
+        const std::string name = p.filename().string();
+        if (name.find(".so") != std::string::npos || name.find(".a") != std::string::npos || name == "CMakeLists.txt")
+            continue;
+        const std::string title = p.stem().string();
+        games.push_back({title, "Installed game", p.string(), {}});
+    }
+}
+
 static std::vector<GameEntry> BuildLibrary(const fs::path& exeDir) {
     std::vector<GameEntry> games;
     const std::string hp = FindSample(exeDir, "hello-playos");
@@ -53,6 +74,10 @@ static std::vector<GameEntry> BuildLibrary(const fs::path& exeDir) {
     const std::string si = FindSample(exeDir, "space-invaders");
     if (!si.empty())
         games.push_back({"Space Invaders", "Classic arcade shooter — defend Earth!", si, {}});
+
+    // Scan /data/games/ for user-installed titles.
+    ScanGameDir("/data/games", games);
+
     if (games.empty())
         games.push_back({"Sleep Demo", "Sleeps 1 second and returns", "/bin/sh", {"-c", "sleep 1"}});
     return games;
