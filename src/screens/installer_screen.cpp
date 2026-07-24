@@ -155,6 +155,8 @@ void InstallerScreen::RunPartitionSteps() {
         // Grow the data partition (p3) to fill remaining space after OS image.
         int rc = std::system(("parted -s " + m_diskPath + " resizepart 3 100%").c_str());
         if (rc != 0) { m_errorMsg = "Failed to resize data partition"; m_step = Step::Failed; return; }
+        // Notify kernel of partition table change so resize2fs sees the new size.
+        std::system(("partprobe " + m_diskPath).c_str());
         m_step = Step::ResizingFS;
         m_stepProgress = 0.5f;
         return;

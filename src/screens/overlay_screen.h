@@ -21,7 +21,8 @@ private:
     static constexpr MenuItem kItems[] = {
         { "WiFi Settings",     "Configure wireless networks"         },
         { "Install to Disk",   "Install PlayOS to the internal disk" },
+        { "Exit to Terminal",  "Stop shell and drop to console"      },
         { "Close",             "Return to previous screen"           },
     };
-    static constexpr int kItemCount = 3;
+    static constexpr int kItemCount = 4;
 };

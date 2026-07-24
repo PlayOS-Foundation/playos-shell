@@ -27,7 +27,14 @@ void OverlayScreen::Update(float dt) {
         switch (m_selected) {
         case 0: m_ctx.stack.Push(std::make_unique<WiFiScreen>(m_ctx)); break;
         case 1: m_ctx.stack.Push(std::make_unique<InstallerScreen>(m_ctx)); break;
-        case 2: m_ctx.stack.Pop(); break;
+        case 2: {
+            // Stop the compositor service — this kills our own process tree
+            // and returns control to the console TTY.
+            std::system("rc-service playos-compositor stop 2>/dev/null");
+            // Fallback: if rc-service isn't available, just exit.
+            std::exit(0);
+        }
+        case 3: m_ctx.stack.Pop(); break;
         }
     }
 }
