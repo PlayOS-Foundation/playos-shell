@@ -357,7 +357,7 @@ void InstallerScreen::Draw(int W, int H) {
         DrawText(m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, m_ctx.theme.textSecondary);
 
         DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.surfaceInput);
-        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.border);
+        DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, 1.0f, m_ctx.theme.border);
 
         float drawProgress = m_stepProgress;
         if (m_step > Step::WritingImage) {
@@ -385,7 +385,7 @@ void InstallerScreen::Draw(int W, int H) {
         DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                              0.1f, 12, m_ctx.theme.surface);
         DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                                   0.1f, 12, m_ctx.theme.border);
+                                   0.1f, 12, 1.0f, m_ctx.theme.border);
 
         DrawText("INSTALLATION COMPLETE",
                  W / 2 - MeasureText("INSTALLATION COMPLETE", 40) / 2,
@@ -449,7 +449,7 @@ void InstallerScreen::Draw(int W, int H) {
     DrawRectangleRounded({(float)px, (float)py, (float)panW, (float)panH},
                          0.1f, 12, m_ctx.theme.surface);
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
-                               0.1f, 12, m_ctx.theme.border);
+                               0.1f, 12, 1.0f, m_ctx.theme.border);
 
     DrawText("INSTALL TO DISK", px + 40, py + 36, 48, m_ctx.theme.danger);
     DrawRectangle(px + 40, py + 100, panW - 80, 2, m_ctx.theme.separator);
