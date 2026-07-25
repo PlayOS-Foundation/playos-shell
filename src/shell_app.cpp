@@ -45,6 +45,16 @@ int ShellApp::Run(int argc, char** argv) {
     HideCursor();
     TraceLog(LOG_INFO, "PLAYOS-SHELL: HideCursor done");
 
+    // Render2Texture: render at a fixed design resolution and scale to
+    // fill the actual window. This ensures correct layout on all output
+    // sizes (e.g., 1920×1080 internal display, 3840×2160 external).
+    constexpr int DESIGN_W = 1920;
+    constexpr int DESIGN_H = 1080;
+    RenderTexture2D renderTex = LoadRenderTexture(DESIGN_W, DESIGN_H);
+    SetTextureFilter(renderTex.texture, TEXTURE_FILTER_BILINEAR);
+    TraceLog(LOG_INFO, "PLAYOS-SHELL: Render texture %dx%d created, window %dx%d",
+             DESIGN_W, DESIGN_H, W, H);
+
     TraceLog(LOG_INFO, "PLAYOS-SHELL: Calling Lifecycle::Init...");
     PlayOS::Lifecycle::Init();
     TraceLog(LOG_INFO, "PLAYOS-SHELL: Lifecycle::Init done");
@@ -91,14 +101,30 @@ int ShellApp::Run(int argc, char** argv) {
         m_statusBar.Update(dt);
         m_stack.Update(dt);
 
+        // Render at design resolution into the off-screen texture.
+        BeginTextureMode(renderTex);
+            ClearBackground(BLANK);
+            m_stack.Draw(DESIGN_W, DESIGN_H);
+            m_statusBar.Draw(DESIGN_W, DESIGN_H, m_ctx.theme);
+        EndTextureMode();
+
+        // Scale the render texture to fill the actual window.
+        // Source rect: flip Y because OpenGL render textures are inverted.
+        // Dest rect: stretch to full window size (both displays are 16:9
+        // so aspect ratio is preserved).
         BeginDrawing();
-        m_stack.Draw(W, H);
-        m_statusBar.Draw(W, H, m_ctx.theme);
+            ClearBackground(BLANK);
+            DrawTexturePro(
+                renderTex.texture,
+                {0, 0, (float)DESIGN_W, -(float)DESIGN_H},
+                {0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()},
+                {0, 0}, 0.0f, WHITE);
         EndDrawing();
     }
 
     PlayOS::Lifecycle::Shutdown();
     m_icons.Unload();
+    UnloadRenderTexture(renderTex);
     CloseWindow();
     return 0;
 }
