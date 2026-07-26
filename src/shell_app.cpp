@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "playos/playos.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -88,7 +89,20 @@ int ShellApp::Run(int argc, char** argv) {
         PlayOS::Lifecycle::Update();
 
         m_statusBar.Update(dt);
+
+        // Frame watchdog: any Update() call that blocks the main
+        // thread starves GLFW input polling.  When the kernel evdev
+        // buffer overflows gamepad state becomes inconsistent.
+        auto t0 = std::chrono::steady_clock::now();
         m_stack.Update(dt);
+        auto t1 = std::chrono::steady_clock::now();
+        auto frameUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        if (frameUs > 100'000) {  // 100 ms
+            TraceLog(LOG_WARNING,
+                     "PLAYOS-SHELL: Slow frame — Update() took %lld µs "
+                     "(threshold 100 ms). Input polling may have starved.",
+                     (long long)frameUs);
+        }
 
         BeginDrawing();
         m_stack.Draw(W, H);
