@@ -62,6 +62,17 @@ OS-specific code in the shell itself.
 
 ---
 
+## 📋 Planned — Infrastructure
+
+### Dependency upgrades
+- [ ] **Raylib 5.x → 6.0.** Update `gen-context.md` version reference from
+  "Raylib 5.x" to "Raylib 6.0". The shell already targets 6.0 via
+  `FetchContent` (`GIT_TAG 6.0` in `CMakeLists.txt`). The main work is
+  in `playos-refdistro` (custom APKBUILD for Alpine, soname updates).
+  See `playos-refdistro/mig2raylib6.md` for the migration plan.
+
+---
+
 ## 📋 Planned — Phase 2 (Settings)
 
 ### Configuration screen
