@@ -169,6 +169,10 @@ void InstallerScreen::RunPartitionSteps() {
         } else {
             part3 += "3";
         }
+        // The filesystem was just written by dd and may have a dirty flag.
+        // resize2fs refuses to operate on a filesystem that needs checking,
+        // so run e2fsck first to clear any post-copy inconsistency.
+        std::system(("e2fsck -f -y " + part3 + " >/dev/null 2>&1").c_str());
         int rc = std::system(("resize2fs -p " + part3).c_str());
         if (rc != 0) { m_errorMsg = "Failed to resize data filesystem"; m_step = Step::Failed; return; }
         m_step = Step::Rebooting;
