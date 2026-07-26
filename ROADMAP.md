@@ -95,6 +95,32 @@ OS-specific code in the shell itself.
 
 ---
 
+## 📋 Planned — Input resilience
+
+> **Goal:** Prevent gamepad input loss caused by main-thread blocking.
+> Root cause: when the GLFW event loop starves, the Xbox 360 gamepad's
+> continuous EV_ABS events overflow the kernel's 64-event evdev buffer,
+> leaving joystick state inconsistent.
+>
+> Primary fix (✅ done): all WiFi scan/connect calls run on background
+> threads; the shell polls each frame via the async `PlayOS::Network`
+> API.  Frame watchdog logs a warning when any `Update()` exceeds 100 ms.
+
+### Gamepad lifecycle monitoring
+- [ ] **`glfwSetJoystickCallback`** — detect gamepad connect/disconnect
+  events. Log when a gamepad disappears (possible buffer overflow
+  aftermath) or reappears. Future: auto-recover by forcing a GLFW
+  joystick re-probe when the callback fires a disconnect followed by
+  a reconnect.
+
+### CI / static analysis
+- [ ] **clang-tidy check** — ban blocking calls (`popen`, `system`,
+  `sleep`, `usleep`, `nanosleep`, `waitpid` without `WNOHANG`) in the
+  shell codebase. Catch blocking I/O at compile time rather than
+  relying on the runtime frame watchdog alone.
+
+---
+
 ## 📋 Planned — Phase 2.5 (Device Profiles · RFC-0006)
 
 > **Goal:** Shell loads device profile at startup for proper button mapping
