@@ -1,5 +1,6 @@
 // PlayOS Shell — WiFiScreen.
 // Browse available WiFi networks and connect with optional password entry.
+// All network operations are non-blocking — the main thread never stalls.
 #pragma once
 
 #include "../core/screen.h"
@@ -18,11 +19,14 @@ public:
 
 private:
     enum class State {
-        Scanning,    // waiting for scan results
-        List,        // browsing networks
-        EnterPass,   // typing password
-        Connecting,  // connect in progress
-        Result,      // success / failure message
+        Scanning,        // starting scan (calls StartScan once)
+        ScanningWait,    // waiting for PollScan to complete
+        List,            // browsing networks
+        EnterPass,       // typing password
+        Connecting,      // starting connect (calls StartConnect once)
+        ConnectingWait,  // waiting for PollConnect to complete
+        PostConnectScan, // rescanning after successful connect
+        Result,          // success / failure message
     };
 
     AppContext& m_ctx;
@@ -42,8 +46,6 @@ private:
     float m_resultTimer = 0.0f;
 
     // Helpers
-    void DoScan();
-    void DoConnect();
     void AppendTypedChar();
     void DrawSignalBars(int x, int y, int signal, bool active) const;
 };

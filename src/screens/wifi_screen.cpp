@@ -77,11 +77,26 @@ void WiFiScreen::OnEnter() {
 
 void WiFiScreen::Update(float dt) {
     switch (m_state) {
-    // ── Scanning: execute on first update so "Scanning..." renders first ──
+    // ── Scanning: kick off background scan, transition to polling ─────────
     case State::Scanning:
-        DoScan();
+        PlayOS::Network::StartScan();
+        m_state = State::ScanningWait;
+        break;
+
+    // ── ScanningWait: poll each frame until done ──────────────────────────
+    case State::ScanningWait: {
+        if (!PlayOS::Network::PollScan(m_networks))
+            break; // still scanning
+
+        m_selected = 0;
+        m_scrollOffset = 0;
+        // Move connected network to top
+        for (int i = 0; i < (int)m_networks.size(); ++i) {
+            if (m_networks[i].active) { m_selected = i; break; }
+        }
         m_state = State::List;
         break;
+    }
 
     // ── List: navigate, connect, rescan, back ──────────────────────────────
     case State::List:
@@ -95,8 +110,11 @@ void WiFiScreen::Update(float dt) {
                 m_password.clear();
                 if (m_networks[m_selected].secured)
                     m_state = State::EnterPass;
-                else
-                    DoConnect();
+                else {
+                    // Open network — connect immediately (non-blocking)
+                    PlayOS::Network::StartConnect(m_networks[m_selected].ssid, "");
+                    m_state = State::ConnectingWait;
+                }
             }
         }
         if (NavX()) {
@@ -129,14 +147,59 @@ void WiFiScreen::Update(float dt) {
         if (IsKeyPressed(KEY_BACKSPACE) && !m_password.empty())
             m_password.pop_back();
 
-        if (IsKeyPressed(KEY_ENTER) && !m_password.empty())
-            DoConnect();
+        if (IsKeyPressed(KEY_ENTER) && !m_password.empty()) {
+            PlayOS::Network::StartConnect(m_networks[m_selected].ssid, m_password);
+            m_state = State::ConnectingWait;
+        }
         break;
     }
 
-    // ── Connecting: wait (blocking DoConnect handles this state) ──────────
-    case State::Connecting:
+    // ── ConnectingWait: poll each frame until connect completes ───────────
+    case State::ConnectingWait: {
+        PlayOS::Network::ConnectResult res;
+        if (!PlayOS::Network::PollConnect(res))
+            break; // still connecting
+
+        switch (res) {
+        case PlayOS::Network::ConnectResult::Success:
+            m_resultMsg = "Connected to \"" + m_networks[m_selected].ssid + "\"!";
+            // Refresh list so the active flag updates
+            PlayOS::Network::StartScan();
+            m_state = State::PostConnectScan;
+            break;
+        case PlayOS::Network::ConnectResult::WrongPassword:
+            m_resultMsg = "Wrong password. Try again.";
+            m_state = State::Result;
+            m_resultTimer = 3.0f;
+            break;
+        case PlayOS::Network::ConnectResult::Timeout:
+            m_resultMsg = "Connection timed out.";
+            m_state = State::Result;
+            m_resultTimer = 3.0f;
+            break;
+        case PlayOS::Network::ConnectResult::Error:
+            m_resultMsg = "Connection failed.";
+            m_state = State::Result;
+            m_resultTimer = 3.0f;
+            break;
+        }
         break;
+    }
+
+    // ── PostConnectScan: poll for post-connect scan results ───────────────
+    case State::PostConnectScan: {
+        if (!PlayOS::Network::PollScan(m_networks))
+            break; // still scanning
+
+        // Refresh selection to point at the now-active network
+        m_selected = 0;
+        for (int i = 0; i < (int)m_networks.size(); ++i) {
+            if (m_networks[i].active) { m_selected = i; break; }
+        }
+        m_state = State::Result;
+        m_resultTimer = 3.0f;
+        break;
+    }
 
     // ── Result: auto-dismiss after 3 seconds or on any button ─────────────
     case State::Result:
@@ -157,7 +220,9 @@ void WiFiScreen::Draw(int W, int H) {
 
     switch (m_state) {
     // ── Scanning ──────────────────────────────────────────────────────────
-    case State::Scanning: {
+    case State::Scanning:
+    case State::ScanningWait:
+    case State::PostConnectScan: {
         const char* msg = "Scanning for networks...";
         DrawText(msg, (W - MeasureText(msg, 40)) / 2, H / 2 - 20, 40,
                  m_ctx.theme.textSecondary);
@@ -243,7 +308,8 @@ void WiFiScreen::Draw(int W, int H) {
     }
 
     // ── Connecting ────────────────────────────────────────────────────────
-    case State::Connecting: {
+    case State::Connecting:
+    case State::ConnectingWait: {
         const auto& n = m_networks[m_selected];
         const char* msg = TextFormat("Connecting to \"%s\"...", n.ssid.c_str());
         DrawText(msg, (W - MeasureText(msg, 36)) / 2, H / 2 - 18, 36,
@@ -275,48 +341,4 @@ void WiFiScreen::DrawSignalBars(int x, int y, int signal, bool active) const {
         Color c = (b < bars) ? onCol : offCol;
         DrawRectangle(x + b * (barW + gap), y + 40 - bh, barW, bh, c);
     }
-}
-
-void WiFiScreen::DoScan() {
-    m_networks = PlayOS::Network::ScanNetworks();
-    m_selected = 0;
-    m_scrollOffset = 0;
-    // Move connected network to top
-    for (int i = 0; i < (int)m_networks.size(); ++i) {
-        if (m_networks[i].active) { m_selected = i; break; }
-    }
-}
-
-void WiFiScreen::DoConnect() {
-    if (m_networks.empty()) return;
-    m_state = State::Connecting;
-
-    // Force a draw frame so "Connecting..." shows
-    const int W = GetScreenWidth(), H = GetScreenHeight();
-    BeginDrawing();
-    Draw(W, H);
-    EndDrawing();
-
-    auto res = PlayOS::Network::Connect(m_networks[m_selected].ssid, m_password);
-
-    switch (res) {
-    case PlayOS::Network::ConnectResult::Success:
-        m_resultMsg = TextFormat("Connected to \"%s\"!",
-                                  m_networks[m_selected].ssid.c_str());
-        // Refresh list so the active flag updates
-        DoScan();
-        break;
-    case PlayOS::Network::ConnectResult::WrongPassword:
-        m_resultMsg = "Wrong password. Try again.";
-        break;
-    case PlayOS::Network::ConnectResult::Timeout:
-        m_resultMsg = "Connection timed out.";
-        break;
-    case PlayOS::Network::ConnectResult::Error:
-        m_resultMsg = "Connection failed.";
-        break;
-    }
-
-    m_state = State::Result;
-    m_resultTimer = 3.0f;
 }
