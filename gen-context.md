@@ -39,7 +39,7 @@ All repos live under `PlayOS-Foundation/` on GitHub and as siblings in `/home/ni
 | **playos-spec** | Source of truth: specification book (174 chapters written), 19 RFCs, 4 ADRs, schemas | Active | mdBook, Markdown, JSON Schema, TOML |
 | **playos-platform-api** | Reference implementation of the Platform API (engine-agnostic C++ library) | v0.3 | C++17, CMake, evdev/XInput/Raylib backends |
 | **playos-runtime** | App lifecycle, process execution, wlroots compositor (C→C++ rewrite planned) | v0.3 | C++17, CMake, wlroots 0.19, TinyWL |
-| **playos-shell** | Reference console UI (controller-first, Raylib). Integrated installer (dd pipeline), WiFi config, game library. | v0.3 | C++17, CMake, Raylib 5.x, Wayland client |
+| **playos-shell** | Reference console UI (controller-first, Raylib). Integrated installer (dd pipeline), WiFi config, game library. | v0.3 | C++17, CMake, Raylib 6.0, Wayland client |
 | **playos-refdistro** | Alpine-based reference OS. Pre-built compressed GPT disk image + bootable ISO. PXE-deployable. | v0.3 | Alpine 3.24, OpenRC, musl, systemd-nspawn, aports, mkimage |
 | **playos-reference-devices** | Per-device device profiles (TOML), bring-up scripts | v0.2 | TOML profiles (ROG Ally, Generic Desktop, ASUS Ultrabook) |
 | **playos-samples** | Official sample apps (hello-playos, space-invaders) | Active | C++17, CMake, Raylib + Platform API |
@@ -93,7 +93,7 @@ All repos live under `PlayOS-Foundation/` on GitHub and as siblings in `/home/ni
 |---|---|
 | **Language** | C++17 (all runtime code) |
 | **Build** | CMake >= 3.20, Ninja |
-| **Rendering (reference)** | Raylib 5.x (fetched via FetchContent) |
+| **Rendering (reference)** | Raylib 6.0 (fetched via FetchContent or system package) |
 | **Compositor** | wlroots 0.19 (TinyWL-derived skeleton) |
 | **Input** | evdev (Linux), XInput (Windows), Raylib polling (cross-plat) |
 | **Reference OS base** | Alpine Linux 3.24 (musl, OpenRC) |
