@@ -77,6 +77,9 @@ static std::vector<GameEntry> BuildLibrary(const fs::path& exeDir) {
     const std::string si = FindSample(exeDir, "space-invaders");
     if (!si.empty())
         games.push_back({"Space Invaders", "Classic arcade shooter — defend Earth!", si, {}});
+    const std::string id = FindSample(exeDir, "input-debug");
+    if (!id.empty())
+        games.push_back({"Input Debug", "Controller button tester — verify inputs", id, {}});
 
     // Scan /data/games/ for user-installed titles.
     ScanGameDir("/data/games", games);
