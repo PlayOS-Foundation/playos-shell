@@ -14,7 +14,8 @@ static bool OvUp()      { return PlayOS::Input::Pressed(PlayOS::Button::DPadUp) 
 static bool OvDown()    { return PlayOS::Input::Pressed(PlayOS::Button::DPadDown) || IsKeyPressed(KEY_DOWN);  }
 static bool OvConfirm() { return PlayOS::Input::Pressed(PlayOS::Button::A)        || IsKeyPressed(KEY_ENTER); }
 static bool OvBack()    { return PlayOS::Input::Pressed(PlayOS::Button::B)        || IsKeyPressed(KEY_ESCAPE)
-                              || PlayOS::Input::Pressed(PlayOS::Button::Home); }
+                              || PlayOS::Input::Pressed(PlayOS::Button::Home)
+                              || PlayOS::Input::Pressed(PlayOS::Button::Y); }
 
 OverlayScreen::OverlayScreen(AppContext& ctx) : m_ctx(ctx) {}
 
