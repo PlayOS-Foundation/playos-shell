@@ -25,6 +25,7 @@ static bool PressedConfirm() {
 static bool PressedHome() {
     return PlayOS::Input::Pressed(PlayOS::Button::Home)
         || PlayOS::Input::Pressed(PlayOS::Button::Y)
+        || PlayOS::Input::Pressed(PlayOS::Button::Select)
         || IsKeyPressed(KEY_H);
 }
 
