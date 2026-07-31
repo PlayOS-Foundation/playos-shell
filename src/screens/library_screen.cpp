@@ -2,6 +2,7 @@
 #include "overlay_screen.h"
 
 #include "../ui/theme.h"
+#include "../ui/text_helpers.h"
 #include "raylib.h"
 #include "playos/playos.h"
 #include "playos/runtime/process.h"
@@ -101,14 +102,20 @@ void LibraryScreen::OnEnter() {
 
 void LibraryScreen::Update(float dt) {
     (void)dt;
-    if (PressedUp())
+    if (PressedUp()) {
         m_selected = (m_selected - 1 + (int)m_library.size()) % (int)m_library.size();
-    if (PressedDown())
+        m_ctx.audio.Play(AudioEvent::MenuMove);
+    }
+    if (PressedDown()) {
         m_selected = (m_selected + 1) % (int)m_library.size();
+        m_ctx.audio.Play(AudioEvent::MenuMove);
+    }
     if (PressedHome())
         m_ctx.stack.Push(std::make_unique<OverlayScreen>(m_ctx));
 
     if (!PressedConfirm()) return;
+
+    m_ctx.audio.Play(AudioEvent::GameLaunch);
 
     // ── Launch game ───────────────────────────────────────────────────────
     const auto& game = m_library[m_selected];
@@ -120,8 +127,8 @@ void LibraryScreen::Update(float dt) {
         BeginDrawing();
         ClearBackground(m_ctx.theme.background);
         const int alpha = (int)(255.0f * ((float)f / 29.0f));
-        DrawText(game.title.c_str(),
-                 (W - MeasureText(game.title.c_str(), 36)) / 2,
+        DrawTextF(m_ctx.textFont, game.title.c_str(),
+                 (W - MeasureTextF(m_ctx.textFont, game.title.c_str(), 36)) / 2,
                  H / 2 - 18, 36, Color{255, 255, 255, (unsigned char)alpha});
         EndDrawing();
     }
@@ -144,7 +151,7 @@ void LibraryScreen::Draw(int W, int H) {
     ClearBackground(m_ctx.theme.background);
 
     // Category heading
-    DrawText("LIBRARY", 160, 144, 28, m_ctx.theme.textSecondary);
+    DrawTextF(m_ctx.textFont, "LIBRARY", 160, 144, 28, m_ctx.theme.textSecondary);
 
     // ── Game list ─────────────────────────────────────────────────────────
     constexpr int kRowH    = 144;
@@ -167,9 +174,9 @@ void LibraryScreen::Draw(int W, int H) {
                              0.2f, 6,
                              isSel ? m_ctx.theme.accent : m_ctx.theme.surfaceButton);
 
-        DrawText(m_library[i].title.c_str(), kListLeft + kIconSz + 48,
+        DrawTextF(m_ctx.textFont, m_library[i].title.c_str(), kListLeft + kIconSz + 48,
                  y + 20, 52, isSel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary);
-        DrawText(m_library[i].subtitle.c_str(), kListLeft + kIconSz + 48,
+        DrawTextF(m_ctx.textFont, m_library[i].subtitle.c_str(), kListLeft + kIconSz + 48,
                  y + 84, 32, m_ctx.theme.textSecondary);
     }
 
@@ -182,7 +189,7 @@ void LibraryScreen::Draw(int W, int H) {
 
     // Status / help line
     if (!m_status.empty())
-        DrawText(m_status.c_str(), 160, H - 144, 36, m_ctx.theme.success);
-    DrawText("Navigate: D-Pad /   Launch: A   \xe2\x80\x94   Home: overlay",
+        DrawTextF(m_ctx.textFont, m_status.c_str(), 160, H - 144, 36, m_ctx.theme.success);
+    DrawTextF(m_ctx.textFont, "Navigate: D-Pad /   Launch: A   \xe2\x80\x94   Home: overlay",
              160, H - 84, 32, m_ctx.theme.textMuted);
 }

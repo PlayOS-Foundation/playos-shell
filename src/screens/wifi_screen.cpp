@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include "../ui/text_helpers.h"
 
 // ── Input helpers ─────────────────────────────────────────────────────────
 
@@ -149,6 +150,7 @@ void WiFiScreen::Update(float dt) {
 
         if (IsKeyPressed(KEY_ENTER) && !m_password.empty()) {
             PlayOS::Network::StartConnect(m_networks[m_selected].ssid, m_password);
+            m_ctx.audio.Play(AudioEvent::Confirm);
             m_state = State::ConnectingWait;
         }
         break;
@@ -163,22 +165,30 @@ void WiFiScreen::Update(float dt) {
         switch (res) {
         case PlayOS::Network::ConnectResult::Success:
             m_resultMsg = "Connected to \"" + m_networks[m_selected].ssid + "\"!";
+            m_ctx.toasts.Show("Connected to " + m_networks[m_selected].ssid,
+                              ToastType::Success);
             // Refresh list so the active flag updates
             PlayOS::Network::StartScan();
             m_state = State::PostConnectScan;
             break;
         case PlayOS::Network::ConnectResult::WrongPassword:
             m_resultMsg = "Wrong password. Try again.";
+            m_ctx.toasts.Show("Connection failed", ToastType::Error);
+            m_ctx.audio.Play(AudioEvent::Error);
             m_state = State::Result;
             m_resultTimer = 3.0f;
             break;
         case PlayOS::Network::ConnectResult::Timeout:
             m_resultMsg = "Connection timed out.";
+            m_ctx.toasts.Show("Connection failed", ToastType::Error);
+            m_ctx.audio.Play(AudioEvent::Error);
             m_state = State::Result;
             m_resultTimer = 3.0f;
             break;
         case PlayOS::Network::ConnectResult::Error:
             m_resultMsg = "Connection failed.";
+            m_ctx.toasts.Show("Connection failed", ToastType::Error);
+            m_ctx.audio.Play(AudioEvent::Error);
             m_state = State::Result;
             m_resultTimer = 3.0f;
             break;
@@ -214,8 +224,8 @@ void WiFiScreen::Draw(int W, int H) {
     ClearBackground(m_ctx.theme.background);
 
     // Header
-    DrawText("WiFi", 160, 100, 52, m_ctx.theme.textPrimary);
-    DrawText("[B] Back    [X] Rescan", W - 500, 108, 28, m_ctx.theme.textMuted);
+    DrawTextF(m_ctx.textFont, "WiFi", 160, 100, 52, m_ctx.theme.textPrimary);
+    DrawTextF(m_ctx.textFont, "[B] Back    [X] Rescan", W - 500, 108, 28, m_ctx.theme.textMuted);
     DrawRectangle(0, 160, W, 2, m_ctx.theme.separator);
 
     switch (m_state) {
@@ -224,7 +234,7 @@ void WiFiScreen::Draw(int W, int H) {
     case State::ScanningWait:
     case State::PostConnectScan: {
         const char* msg = "Scanning for networks...";
-        DrawText(msg, (W - MeasureText(msg, 40)) / 2, H / 2 - 20, 40,
+        DrawTextF(m_ctx.textFont, msg, (W - MeasureTextF(m_ctx.textFont, msg, 40)) / 2, H / 2 - 20, 40,
                  m_ctx.theme.textSecondary);
         break;
     }
@@ -233,7 +243,7 @@ void WiFiScreen::Draw(int W, int H) {
     case State::List: {
         if (m_networks.empty()) {
             const char* msg = "No networks found.  Press X to rescan.";
-            DrawText(msg, (W - MeasureText(msg, 36)) / 2, H / 2 - 18, 36,
+            DrawTextF(m_ctx.textFont, msg, (W - MeasureTextF(m_ctx.textFont, msg, 36)) / 2, H / 2 - 18, 36,
                      m_ctx.theme.textSecondary);
             break;
         }
@@ -263,18 +273,18 @@ void WiFiScreen::Draw(int W, int H) {
             // SSID
             Color nameCol = sel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary;
             if (n.active) nameCol = m_ctx.theme.success;
-            DrawText(n.ssid.c_str(), kLeft + 20, y + 24, 36, nameCol);
+            DrawTextF(m_ctx.textFont, n.ssid.c_str(), kLeft + 20, y + 24, 36, nameCol);
 
             // Lock icon or "open"
             const char* secLabel = n.secured ? "secured" : "open";
-            DrawText(secLabel, kLeft + 20, y + 66, 22, m_ctx.theme.textMuted);
+            DrawTextF(m_ctx.textFont, secLabel, kLeft + 20, y + 66, 22, m_ctx.theme.textMuted);
 
             // Signal bars
             DrawSignalBars(W - kLeft - 100, y + 20, n.signal, n.active);
         }
 
         // Help
-        DrawText("[A] Connect    [X] Rescan",
+        DrawTextF(m_ctx.textFont, "[A] Connect    [X] Rescan",
                  160, H - 70, 28, m_ctx.theme.textMuted);
         break;
     }
@@ -282,7 +292,7 @@ void WiFiScreen::Draw(int W, int H) {
     // ── Password entry ────────────────────────────────────────────────────
     case State::EnterPass: {
         const auto& n = m_networks[m_selected];
-        DrawText(TextFormat("Password for \"%s\":", n.ssid.c_str()),
+        DrawTextF(m_ctx.textFont, TextFormat("Password for \"%s\":", n.ssid.c_str()),
                  160, H / 2 - 120, 36, m_ctx.theme.textPrimary);
 
         // Password field
@@ -297,10 +307,10 @@ void WiFiScreen::Draw(int W, int H) {
         std::string display = m_passVisible ? m_password
                             : std::string(m_password.size(), '*');
         display += (int)(GetTime() * 2) % 2 ? "|" : " "; // cursor blink
-        DrawText(display.c_str(), W / 2 - 380, H / 2 - 20, 36,
+        DrawTextF(m_ctx.textFont, display.c_str(), W / 2 - 380, H / 2 - 20, 36,
                  m_ctx.theme.textPrimary);
 
-        DrawText("[Enter] Connect    [Esc] Cancel    [Tab] Show/hide",
+        DrawTextF(m_ctx.textFont, "[Enter] Connect    [Esc] Cancel    [Tab] Show/hide",
                  160, H / 2 + 80, 26, m_ctx.theme.textMuted);
 
         if (IsKeyPressed(KEY_TAB)) m_passVisible = !m_passVisible;
@@ -312,7 +322,7 @@ void WiFiScreen::Draw(int W, int H) {
     case State::ConnectingWait: {
         const auto& n = m_networks[m_selected];
         const char* msg = TextFormat("Connecting to \"%s\"...", n.ssid.c_str());
-        DrawText(msg, (W - MeasureText(msg, 36)) / 2, H / 2 - 18, 36,
+        DrawTextF(m_ctx.textFont, msg, (W - MeasureTextF(m_ctx.textFont, msg, 36)) / 2, H / 2 - 18, 36,
                  m_ctx.theme.textSecondary);
         break;
     }
@@ -321,8 +331,8 @@ void WiFiScreen::Draw(int W, int H) {
     case State::Result: {
         Color col = (m_resultMsg.find("Connected") != std::string::npos)
                   ? m_ctx.theme.success : m_ctx.theme.danger;
-        DrawText(m_resultMsg.c_str(),
-                 (W - MeasureText(m_resultMsg.c_str(), 40)) / 2,
+        DrawTextF(m_ctx.textFont, m_resultMsg.c_str(),
+                 (W - MeasureTextF(m_ctx.textFont, m_resultMsg.c_str(), 40)) / 2,
                  H / 2 - 20, 40, col);
         break;
     }

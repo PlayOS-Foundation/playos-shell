@@ -51,6 +51,29 @@ int ShellApp::Run(int argc, char** argv) {
     m_icons.Load();
     TraceLog(LOG_INFO, "PLAYOS-SHELL: Icons loaded");
 
+    // Load UI sounds (graceful if directory is absent).
+    m_audioManager.Load("/usr/share/playos/sounds/");
+
+    // Load a readable UI font for console text.
+    // Try the PlayOS-bundled path first, then system DejaVu Sans.
+    const char* fontCandidates[] = {
+        "/usr/share/playos/fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    };
+    for (const char* path : fontCandidates) {
+        if (FileExists(path)) {
+            m_textFont = LoadFontEx(path, 48, nullptr, 0);
+            SetTextureFilter(m_textFont.texture, TEXTURE_FILTER_BILINEAR);
+            m_ctx.textFont = m_textFont;
+            TraceLog(LOG_INFO, "PLAYOS-SHELL: UI font loaded: %s (baseSize=%d)",
+                     path, m_textFont.baseSize);
+            break;
+        }
+    }
+    if (m_textFont.baseSize == 0)
+        TraceLog(LOG_WARNING, "PLAYOS-SHELL: No UI font found, using raylib default");
+
     // Only load from /run (safe tmpfs staged by initramfs).  Never read
     // TOML files from EROFS — tomlplusplus segfaults on EROFS content.
     std::string profilePath;
@@ -89,6 +112,7 @@ int ShellApp::Run(int argc, char** argv) {
         PlayOS::Lifecycle::Update();
 
         m_statusBar.Update(dt);
+        m_toastManager.Update(dt);
 
         // Frame watchdog: any Update() call that blocks the main
         // thread starves GLFW input polling.  When the kernel evdev
@@ -106,12 +130,15 @@ int ShellApp::Run(int argc, char** argv) {
 
         BeginDrawing();
         m_stack.Draw(W, H);
-        m_statusBar.Draw(W, H, m_ctx.theme);
+        m_toastManager.Draw(W, H, m_ctx.theme, m_textFont);
+        m_statusBar.Draw(W, H, m_ctx.theme, m_textFont);
         EndDrawing();
     }
 
     PlayOS::Lifecycle::Shutdown();
     m_icons.Unload();
+    m_audioManager.Unload();
+    if (m_textFont.baseSize > 0) UnloadFont(m_textFont);
     CloseWindow();
     return 0;
 }

@@ -6,8 +6,14 @@
 
 #include "screen_stack.h"
 #include "../ui/theme.h"
+#include "../ui/toast_manager.h"
+#include "../ui/text_helpers.h"
+#include "../audio/audio_manager.h"
 
 struct AppContext {
-    ScreenStack& stack;
-    Theme        theme{Theme::Dark()};
+    ScreenStack&   stack;
+    ToastManager&  toasts;
+    AudioManager&  audio;
+    Font           textFont = {};
+    Theme          theme{Theme::Dark()};
 };

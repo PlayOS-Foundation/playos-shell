@@ -1,5 +1,6 @@
 #include "status_bar.h"
 #include "theme.h"
+#include "text_helpers.h"
 
 #include "raylib.h"
 #include "playos/playos.h"
@@ -35,23 +36,23 @@ void StatusBar::Poll() {
     m_ip = (ip && ip[0] != '\0') ? ip : "";
 }
 
-void StatusBar::Draw(int W, int H, const Theme& theme) const {
+void StatusBar::Draw(int W, int H, const Theme& theme, Font textFont) const {
     // ── top bar ──────────────────────────────────────────────────────────
     DrawRectangle(0, 0, W, 72, theme.statusBarBg);
 
     // Device name from profile (e.g. "ASUS ROG Ally") next to "PlayOS"
     if (!m_deviceName.empty()) {
-        DrawText(TextFormat("PlayOS  ·  %s", m_deviceName.c_str()),
-                 32, 16, 32, theme.textPrimary);
+        DrawTextF(textFont, TextFormat("PlayOS  ·  %s", m_deviceName.c_str()),
+                  32, 16, 32, theme.textPrimary);
     } else {
-        DrawText("PlayOS", 32, 16, 40, theme.textPrimary);
+        DrawTextF(textFont, "PlayOS", 32, 16, 40, theme.textPrimary);
     }
 
     if (m_controllerOn) {
         DrawCircle(W - 200, 36, 10, theme.success);
-        DrawText("Controller", W - 176, 16, 32, theme.textSecondary);
+        DrawTextF(textFont, "Controller", W - 176, 16, 32, theme.textSecondary);
     } else {
-        DrawText("No controller", W - 260, 16, 32, theme.inactive);
+        DrawTextF(textFont, "No controller", W - 260, 16, 32, theme.inactive);
     }
 
     // ── bottom-right indicators ───────────────────────────────────────────
@@ -66,10 +67,10 @@ void StatusBar::Draw(int W, int H, const Theme& theme) const {
         const char* glyph   = m_battCharging ? Icons::BatteryCharge : Icons::Battery;
         const char* fallback = m_battCharging ? "~" : "";
         const float iw  = m_icons.Measure(glyph, fallback, 44);
-        const int   pctW = MeasureText(pctStr, 28);
+        const int   pctW = (int)MeasureTextF(textFont, pctStr, 28);
         float rx = (float)(W) - iw - pctW - 52;
         m_icons.Draw(glyph, fallback, rx, (float)(H - 148), 44, col);
-        DrawText(pctStr, W - pctW - 40, H - 142, 28, col);
+        DrawTextF(textFont, pctStr, W - pctW - 40, H - 142, 28, col);
     }
 
     // WiFi + Bluetooth row
@@ -99,7 +100,7 @@ void StatusBar::Draw(int W, int H, const Theme& theme) const {
     // IP address
     if (!m_ip.empty()) {
         const char* label = TextFormat("IP: %s", m_ip.c_str());
-        const int lw = MeasureText(label, 32);
-        DrawText(label, W - lw - 40, H - 136, 32, theme.success);
+        const int lw = (int)MeasureTextF(textFont, label, 32);
+        DrawTextF(textFont, label, W - lw - 40, H - 136, 32, theme.success);
     }
 }

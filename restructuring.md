@@ -126,7 +126,7 @@ corresponding `gTheme.*` field. Mappings:
 
 ### T2.1 — Create `ToastManager`
 
-- [ ] Create `src/ui/toast_manager.h`:
+- [x] Create `src/ui/toast_manager.h`:
   ```cpp
   enum class ToastType { Info, Success, Warning, Error };
 
@@ -141,32 +141,32 @@ corresponding `gTheme.*` field. Mappings:
       static constexpr float kDuration = 3.0f;
   };
   ```
-- [ ] Create `src/ui/toast_manager.cpp`:
+- [x] Create `src/ui/toast_manager.cpp`:
   - `Show()` pushes to `m_queue`
   - `Update()` decrements timers, removes expired toasts
   - `Draw()` renders stacked toasts at top-right with slide-in animation
     (translate based on remaining time for first 200ms). Colored left border
     per type: blue=info, green=success, yellow=warning, red=error.
-- [ ] Update `CMakeLists.txt`
-- [ ] Build and verify
+- [x] Update `CMakeLists.txt`
+- [x] Build and verify
 
 ### T2.2 — Integrate ToastManager into AppContext + ShellApp
 
-- [ ] Add `ToastManager& toasts;` to `AppContext`
-- [ ] `ShellApp` owns `ToastManager m_toastManager` and passes it via
+- [x] Add `ToastManager& toasts;` to `AppContext`
+- [x] `ShellApp` owns `ToastManager m_toastManager` and passes it via
   `AppContext{m_stack, m_theme, m_toastManager}`
-- [ ] Add `m_toastManager.Update(dt)` to main loop
-- [ ] Add `m_toastManager.Draw(W, H)` after `m_stack.Draw(W, H)` and
+- [x] Add `m_toastManager.Update(dt)` to main loop
+- [x] Add `m_toastManager.Draw(W, H)` after `m_stack.Draw(W, H)` and
   before `m_statusBar.Draw(W, H)`
-- [ ] Build and verify
+- [x] Build and verify
 
 ### T2.3 — Wire toasts into existing screens
 
-- [ ] `WiFiScreen`: show "Connected to <SSID>" success toast on connect,
+- [x] `WiFiScreen`: show "Connected to <SSID>" success toast on connect,
   "Connection failed" error toast on failure
-- [ ] `InstallerScreen`: show "Installation complete — rebooting" success
+- [x] `InstallerScreen`: show "Installation complete — rebooting" success
   toast, "Installation failed — see log" error toast
-- [ ] Build and verify
+- [x] Build and verify
 
 ---
 
@@ -177,7 +177,7 @@ corresponding `gTheme.*` field. Mappings:
 
 ### T3.1 — Create `AudioManager`
 
-- [ ] Create `src/audio/audio_manager.h`:
+- [x] Create `src/audio/audio_manager.h`:
   ```cpp
   enum class AudioEvent { MenuMove, Confirm, Back, OverlayOpen,
                           GameLaunch, Notification, Error };
@@ -199,34 +199,34 @@ corresponding `gTheme.*` field. Mappings:
       // Raylib Sound handles per event
   };
   ```
-- [ ] Create `src/audio/audio_manager.cpp`:
+- [x] Create `src/audio/audio_manager.cpp`:
   - `Load()` loads WAV files from `soundDir`: `move.wav`, `confirm.wav`,
     `back.wav`, `overlay.wav`, `launch.wav`, `notify.wav`, `error.wav`
   - `Play()` calls `PlaySound()` on the corresponding handle. Apply a
     50ms cooldown on `MenuMove` to prevent sound spam on rapid scrolling.
   - Graceful fallback: if any sound fails to load, that event is silent.
-- [ ] Update `CMakeLists.txt`
-- [ ] Build and verify
+- [x] Update `CMakeLists.txt`
+- [x] Build and verify
 
 ### T3.2 — Integrate AudioManager into AppContext + ShellApp
 
-- [ ] Add `AudioManager& audio;` to `AppContext`
-- [ ] `ShellApp` owns `AudioManager m_audioManager`, calls
+- [x] Add `AudioManager& audio;` to `AppContext`
+- [x] `ShellApp` owns `AudioManager m_audioManager`, calls
   `m_audioManager.Load("/usr/share/playos/sounds/")` during init,
   passes via `AppContext{...}`
-- [ ] Add `m_audioManager.Update(dt)` to main loop
-- [ ] Build and verify
+- [x] Add `m_audioManager.Update(dt)` to main loop
+- [x] Build and verify
 
 ### T3.3 — Wire sounds into screens
 
-- [ ] `LibraryScreen::Update()`: call `m_ctx.audio.Play(MenuMove)` on D-Pad,
+- [x] `LibraryScreen::Update()`: call `m_ctx.audio.Play(MenuMove)` on D-Pad,
   `m_ctx.audio.Play(Confirm)` on A, `m_ctx.audio.Play(GameLaunch)` on launch
-- [ ] `OverlayScreen::Update()`: `m_ctx.audio.Play(OverlayOpen)` on enter,
+- [x] `OverlayScreen::Update()`: `m_ctx.audio.Play(OverlayOpen)` on enter,
   `m_ctx.audio.Play(Confirm)` on select, `m_ctx.audio.Play(Back)` on close
-- [ ] `WiFiScreen::Update()`: `m_ctx.audio.Play(Confirm)` on connect,
+- [x] `WiFiScreen::Update()`: `m_ctx.audio.Play(Confirm)` on connect,
   `m_ctx.audio.Play(Error)` on failure
-- [ ] All screens: `m_ctx.audio.Play(Back)` on B press
-- [ ] Build and verify
+- [x] All screens: `m_ctx.audio.Play(Back)` on B press
+- [x] Build and verify
 
 ---
 

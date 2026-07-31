@@ -12,6 +12,7 @@
 #include <glob.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include "../ui/text_helpers.h"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +225,7 @@ void InstallerScreen::StartInstall() {
     }
 
     m_installing = true;
+    m_toastShown = false;
     m_installTimer = 0.0f;
     m_completeTimer = 0.0f;
     m_step = Step::WritingImage;
@@ -245,6 +247,7 @@ void InstallerScreen::OnEnter() {
     FindImage();  // Check image availability for UI feedback
     m_selected = 1;
     m_installing = false;
+    m_toastShown = false;
     m_installTimer = 0.0f;
     m_step = Step::FindingImage;
     m_childPid = -1;
@@ -265,10 +268,12 @@ void InstallerScreen::Update(float dt) {
                     m_stepProgress = 1.0f;
                 } else {
                     m_errorMsg = "Failed to write disk image.\nCheck /run/playos/dd-progress for details.";
+                    m_ctx.audio.Play(AudioEvent::Error);
                     m_step = Step::Failed;
                 }
             } else if (result == -1) {
                 m_errorMsg = "Install process terminated unexpectedly.";
+                m_ctx.audio.Play(AudioEvent::Error);
                 m_step = Step::Failed;
             } else {
                 ParseDDProgress();
@@ -288,6 +293,11 @@ void InstallerScreen::Update(float dt) {
         }
 
         if (m_step == Step::Rebooting) {
+            if (!m_toastShown) {
+                m_ctx.toasts.Show("Installation complete — rebooting",
+                                  ToastType::Success);
+                m_toastShown = true;
+            }
             if (PressedUp() || PressedDown()) {
                 m_rebootSelected = 1 - m_rebootSelected;
             }
@@ -307,15 +317,24 @@ void InstallerScreen::Update(float dt) {
             return;
         }
 
-        if (m_step == Step::Failed || m_step == Step::Done) return;
+        if (m_step == Step::Failed || m_step == Step::Done) {
+            if (m_step == Step::Failed && !m_toastShown) {
+                m_ctx.toasts.Show("Installation failed — see log",
+                                  ToastType::Error);
+                m_ctx.audio.Play(AudioEvent::Error);
+                m_toastShown = true;
+            }
+            return;
+        }
         return;
     }
 
-    if (PressedUp())        m_selected = 0;
-    if (PressedDown())      m_selected = 1;
-    if (PressedBack())      { m_ctx.stack.Pop(); return; }
+    if (PressedUp())        { m_ctx.audio.Play(AudioEvent::MenuMove); m_selected = 0; }
+    if (PressedDown())      { m_ctx.audio.Play(AudioEvent::MenuMove); m_selected = 1; }
+    if (PressedBack())      { m_ctx.audio.Play(AudioEvent::Back); m_ctx.stack.Pop(); return; }
 
     if (PressedConfirm()) {
+        m_ctx.audio.Play(AudioEvent::Confirm);
         if (m_selected == 0 && !m_diskPath.empty()) {
             StartInstall();
         } else {
@@ -356,11 +375,11 @@ void InstallerScreen::Draw(int W, int H) {
             stageLabel = "Growing data filesystem...";
         }
 
-        int tw = MeasureText(stageLabel, 32);
-        DrawText(stageLabel, (W - tw) / 2, barY - 60, 32, m_ctx.theme.textPrimary);
+        int tw = MeasureTextF(m_ctx.textFont, stageLabel, 32);
+        DrawTextF(m_ctx.textFont, stageLabel, (W - tw) / 2, barY - 60, 32, m_ctx.theme.textPrimary);
 
-        tw = MeasureText(m_diskPath.c_str(), 22);
-        DrawText(m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, m_ctx.theme.textSecondary);
+        tw = MeasureTextF(m_ctx.textFont, m_diskPath.c_str(), 22);
+        DrawTextF(m_ctx.textFont, m_diskPath.c_str(), (W - tw) / 2, barY - 20, 22, m_ctx.theme.textSecondary);
 
         DrawRectangleRounded({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.surfaceInput);
         DrawRectangleRoundedLines({(float)barX, (float)barY, (float)barW, (float)barH}, 0.3f, 8, m_ctx.theme.border);
@@ -377,8 +396,8 @@ void InstallerScreen::Draw(int W, int H) {
 
             int pct = (int)(drawProgress * 100.0f);
             const char* pctText = TextFormat("%d%%", pct);
-            tw = MeasureText(pctText, 24);
-            DrawText(pctText, barX + barW / 2 - tw / 2, barY + 8, 24, m_ctx.theme.textPrimary);
+            tw = MeasureTextF(m_ctx.textFont, pctText, 24);
+            DrawTextF(m_ctx.textFont, pctText, barX + barW / 2 - tw / 2, barY + 8, 24, m_ctx.theme.textPrimary);
         }
         return;
     }
@@ -393,52 +412,52 @@ void InstallerScreen::Draw(int W, int H) {
         DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
                                    0.1f, 12, m_ctx.theme.border);
 
-        DrawText("INSTALLATION COMPLETE",
-                 W / 2 - MeasureText("INSTALLATION COMPLETE", 40) / 2,
+        DrawTextF(m_ctx.textFont, "INSTALLATION COMPLETE",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "INSTALLATION COMPLETE", 40) / 2,
                  py + 40, 40, m_ctx.theme.success);
 
-        DrawText("PlayOS has been written to disk successfully.",
-                 W / 2 - MeasureText("PlayOS has been written to disk successfully.", 22) / 2,
+        DrawTextF(m_ctx.textFont, "PlayOS has been written to disk successfully.",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "PlayOS has been written to disk successfully.", 22) / 2,
                  py + 100, 22, m_ctx.theme.textPrimary);
-        DrawText("Remove the PXE / installation media before rebooting.",
-                 W / 2 - MeasureText("Remove the PXE / installation media before rebooting.", 20) / 2,
+        DrawTextF(m_ctx.textFont, "Remove the PXE / installation media before rebooting.",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "Remove the PXE / installation media before rebooting.", 20) / 2,
                  py + 130, 20, m_ctx.theme.textSecondary);
 
         int by = py + panH - 100;
 
         Color rebBg = (m_rebootSelected == 0) ? m_ctx.theme.danger : m_ctx.theme.surfaceButton;
         DrawRectangleRounded({(float)(px + 40), (float)by, 260.0f, 56.0f}, 0.3f, 8, rebBg);
-        DrawText("Reboot Now", px + 60, by + 12, 28,
+        DrawTextF(m_ctx.textFont, "Reboot Now", px + 60, by + 12, 28,
                  (m_rebootSelected == 0) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
         Color stayBg = (m_rebootSelected == 1) ? m_ctx.theme.separator : m_ctx.theme.surfaceButton;
         DrawRectangleRounded({(float)(px + 340), (float)by, 260.0f, 56.0f}, 0.3f, 8, stayBg);
-        DrawText("Stay in Shell", px + 360, by + 12, 28,
+        DrawTextF(m_ctx.textFont, "Stay in Shell", px + 360, by + 12, 28,
                  (m_rebootSelected == 1) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
-        DrawText("[Up/Down] Choose    [Enter] Confirm",
-                 W / 2 - MeasureText("[Up/Down] Choose    [Enter] Confirm", 20) / 2,
+        DrawTextF(m_ctx.textFont, "[Up/Down] Choose    [Enter] Confirm",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "[Up/Down] Choose    [Enter] Confirm", 20) / 2,
                  py + panH - 28, 20, m_ctx.theme.textMuted);
         return;
     }
 
     // ── Failed state ────────────────────────────────────────────────────────
     if (m_installing && m_step == Step::Failed) {
-        DrawText("INSTALLATION FAILED",
-                 W / 2 - MeasureText("INSTALLATION FAILED", 40) / 2,
+        DrawTextF(m_ctx.textFont, "INSTALLATION FAILED",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "INSTALLATION FAILED", 40) / 2,
                  H / 2 - 80, 40, m_ctx.theme.danger);
 
         int y = H / 2 - 20;
         std::istringstream errs(m_errorMsg);
         std::string errLine;
         while (std::getline(errs, errLine)) {
-            int tw = MeasureText(errLine.c_str(), 20);
-            DrawText(errLine.c_str(), (W - tw) / 2, y, 20, m_ctx.theme.danger);
+            int tw = MeasureTextF(m_ctx.textFont, errLine.c_str(), 20);
+            DrawTextF(m_ctx.textFont, errLine.c_str(), (W - tw) / 2, y, 20, m_ctx.theme.danger);
             y += 26;
         }
 
-        DrawText("Press ENTER or ESC to dismiss",
-                 W / 2 - MeasureText("Press ENTER or ESC to dismiss", 22) / 2,
+        DrawTextF(m_ctx.textFont, "Press ENTER or ESC to dismiss",
+                 W / 2 - MeasureTextF(m_ctx.textFont, "Press ENTER or ESC to dismiss", 22) / 2,
                  H / 2 + 100, 22, m_ctx.theme.textPrimary);
 
         if (PressedConfirm() || PressedBack()) {
@@ -457,28 +476,28 @@ void InstallerScreen::Draw(int W, int H) {
     DrawRectangleRoundedLines({(float)px, (float)py, (float)panW, (float)panH},
                                0.1f, 12, m_ctx.theme.border);
 
-    DrawText("INSTALL TO DISK", px + 40, py + 36, 48, m_ctx.theme.danger);
+    DrawTextF(m_ctx.textFont, "INSTALL TO DISK", px + 40, py + 36, 48, m_ctx.theme.danger);
     DrawRectangle(px + 40, py + 100, panW - 80, 2, m_ctx.theme.separator);
 
-    DrawText("WARNING: This will ERASE ALL DATA on the target disk.",
+    DrawTextF(m_ctx.textFont, "WARNING: This will ERASE ALL DATA on the target disk.",
              px + 40, py + 130, 24, m_ctx.theme.warning);
-    DrawText("There is NO undo. Make sure you have backups.",
+    DrawTextF(m_ctx.textFont, "There is NO undo. Make sure you have backups.",
              px + 40, py + 162, 22, m_ctx.theme.warning);
 
-    DrawText("Target disk:", px + 40, py + 210, 28, m_ctx.theme.textSecondary);
-    DrawText(TextFormat("%s  (%s)", m_diskPath.c_str(), m_diskSize.c_str()),
+    DrawTextF(m_ctx.textFont, "Target disk:", px + 40, py + 210, 28, m_ctx.theme.textSecondary);
+    DrawTextF(m_ctx.textFont, TextFormat("%s  (%s)", m_diskPath.c_str(), m_diskSize.c_str()),
              px + 40, py + 248, 36, m_ctx.theme.textPrimary);
 
     if (!m_diskPath.empty() && !m_imagePath.empty()) {
-        DrawText(TextFormat("Image: %s", m_imagePath.c_str()),
+        DrawTextF(m_ctx.textFont, TextFormat("Image: %s", m_imagePath.c_str()),
                  px + 40, py + 300, 22, m_ctx.theme.success);
     } else if (!m_diskPath.empty()) {
-        DrawText("No disk image found. Place playos-gpt-*.img.zst on USB.",
+        DrawTextF(m_ctx.textFont, "No disk image found. Place playos-gpt-*.img.zst on USB.",
                  px + 40, py + 300, 22, m_ctx.theme.warning);
     }
 
     if (m_diskPath.empty()) {
-        DrawText("No internal disk detected.",
+        DrawTextF(m_ctx.textFont, "No internal disk detected.",
                  px + 40, py + 300, 24, m_ctx.theme.danger);
     }
 
@@ -486,14 +505,14 @@ void InstallerScreen::Draw(int W, int H) {
 
     Color confBg = (m_selected == 0) ? m_ctx.theme.danger : m_ctx.theme.surfaceButton;
     DrawRectangleRounded({(float)(px + 40), (float)by, 320.0f, 64.0f}, 0.3f, 8, confBg);
-    DrawText("ERASE & INSTALL", px + 60, by + 16, 30,
+    DrawTextF(m_ctx.textFont, "ERASE & INSTALL", px + 60, by + 16, 30,
              (m_selected == 0) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
     Color cancBg = (m_selected == 1) ? m_ctx.theme.separator : m_ctx.theme.surfaceButton;
     DrawRectangleRounded({(float)(px + 400), (float)by, 320.0f, 64.0f}, 0.3f, 8, cancBg);
-    DrawText("CANCEL", px + 420, by + 16, 30,
+    DrawTextF(m_ctx.textFont, "CANCEL", px + 420, by + 16, 30,
              (m_selected == 1) ? m_ctx.theme.textPrimary : m_ctx.theme.textMuted);
 
-    DrawText("[Up/Down] Choose    [Enter] Confirm    [Esc/B] Back",
+    DrawTextF(m_ctx.textFont, "[Up/Down] Choose    [Enter] Confirm    [Esc/B] Back",
              px + 40, py + panH - 38, 20, m_ctx.theme.textMuted);
 }

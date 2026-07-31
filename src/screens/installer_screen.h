@@ -17,6 +17,7 @@ private:
     AppContext& m_ctx;
     int m_selected = 1;        // 0 = Confirm, 1 = Cancel (default Cancel for safety)
     bool m_installing = false;
+    bool m_toastShown = false; // one-shot guard for install result toasts
     float m_installTimer = 0.0f;
     float m_completeTimer = 0.0f;
     int m_rebootSelected = 0;  // 0 = Reboot Now, 1 = Stay in Shell

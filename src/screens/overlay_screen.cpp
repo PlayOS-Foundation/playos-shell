@@ -7,6 +7,7 @@
 #include "playos/playos.h"
 #include <cstdlib>
 #include <memory>
+#include "../ui/text_helpers.h"
 
 constexpr OverlayScreen::MenuItem OverlayScreen::kItems[];
 
@@ -20,12 +21,17 @@ static bool OvBack()    { return PlayOS::Input::Pressed(PlayOS::Button::B)      
 
 OverlayScreen::OverlayScreen(AppContext& ctx) : m_ctx(ctx) {}
 
+void OverlayScreen::OnEnter() {
+    m_ctx.audio.Play(AudioEvent::OverlayOpen);
+}
+
 void OverlayScreen::Update(float dt) {
     (void)dt;
-    if (OvBack())    { m_ctx.stack.Pop(); return; }
-    if (OvUp())      m_selected = std::max(0, m_selected - 1);
-    if (OvDown())    m_selected = std::min(kItemCount - 1, m_selected + 1);
+    if (OvBack())    { m_ctx.audio.Play(AudioEvent::Back); m_ctx.stack.Pop(); return; }
+    if (OvUp())      { m_ctx.audio.Play(AudioEvent::MenuMove); m_selected = std::max(0, m_selected - 1); }
+    if (OvDown())    { m_ctx.audio.Play(AudioEvent::MenuMove); m_selected = std::min(kItemCount - 1, m_selected + 1); }
     if (OvConfirm()) {
+        m_ctx.audio.Play(AudioEvent::Confirm);
         switch (m_selected) {
         case 0: m_ctx.stack.Push(std::make_unique<WiFiScreen>(m_ctx)); break;
         case 1: m_ctx.stack.Push(std::make_unique<InstallerScreen>(m_ctx)); break;
@@ -54,7 +60,7 @@ void OverlayScreen::Draw(int W, int H) {
                                0.1f, 12, m_ctx.theme.border);
 
     // Title
-    DrawText("SYSTEM", px + 40, py + 36, 52, m_ctx.theme.textPrimary);
+    DrawTextF(m_ctx.textFont, "SYSTEM", px + 40, py + 36, 52, m_ctx.theme.textPrimary);
     DrawRectangle(px + 40, py + 100, panW - 80, 2, m_ctx.theme.separator);
 
     // Menu items
@@ -65,19 +71,19 @@ void OverlayScreen::Draw(int W, int H) {
             DrawRectangleRounded({(float)(px + 30), (float)(iy - 8),
                                    (float)(panW - 60), 90.0f},
                                   0.2f, 8, m_ctx.theme.selected);
-        DrawText(kItems[i].label, px + 60, iy + 4, 36,
+        DrawTextF(m_ctx.textFont, kItems[i].label, px + 60, iy + 4, 36,
                  sel ? m_ctx.theme.textPrimary : m_ctx.theme.textSecondary);
-        DrawText(kItems[i].hint, px + 60, iy + 48, 22,
+        DrawTextF(m_ctx.textFont, kItems[i].hint, px + 60, iy + 48, 22,
                  m_ctx.theme.textMuted);
     }
 
     // Help
-    DrawText("[A] Select    [B] / [Home] Close",
+    DrawTextF(m_ctx.textFont, "[A] Select    [B] / [Home] Close",
              px + 40, py + panH - 54, 24, m_ctx.theme.textMuted);
 
     // Storage info (bottom)
-    DrawText(TextFormat("Saves: %s",  PlayOS::Storage::SavePath()),
+    DrawTextF(m_ctx.textFont, TextFormat("Saves: %s",  PlayOS::Storage::SavePath()),
              80, H - 160, 24, m_ctx.theme.textMuted);
-    DrawText(TextFormat("Config: %s", PlayOS::Storage::ConfigPath()),
+    DrawTextF(m_ctx.textFont, TextFormat("Config: %s", PlayOS::Storage::ConfigPath()),
              80, H - 124, 24, m_ctx.theme.textMuted);
 }

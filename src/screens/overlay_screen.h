@@ -10,6 +10,7 @@ class OverlayScreen : public IScreen {
 public:
     explicit OverlayScreen(AppContext& ctx);
 
+    void OnEnter() override;
     void Update(float dt) override;
     void Draw(int W, int H) override;
 

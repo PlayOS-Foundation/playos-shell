@@ -68,12 +68,14 @@ add_executable(playos-shell
     src/shell_app.cpp
     src/core/screen_stack.cpp
     src/ui/theme.cpp
+    src/ui/toast_manager.cpp
     src/ui/icons.cpp
     src/ui/status_bar.cpp
     src/screens/library_screen.cpp
     src/screens/overlay_screen.cpp
     src/screens/wifi_screen.cpp
     src/screens/installer_screen.cpp  # dd-based disk image installer
+    src/audio/audio_manager.cpp
 )
 target_link_libraries(playos-shell PRIVATE
     PlayOS::PlatformAPI
