@@ -5,9 +5,9 @@ This repository implements the **PlayOS shell** — a controller-first, fullscre
 ## Specification Reference
 
 Before touching any file here, read:
-- [`playos-spec/src/playos-shell-spec.md`](https://github.com/your-org/playos-spec/blob/main/src/playos-shell-spec.md) — all screens, navigation rules, launch flow, input handling
-- [`playos-spec/src/playos-overlay-spec.md`](https://github.com/your-org/playos-spec/blob/main/src/playos-overlay-spec.md) — how the overlay interacts with the shell
-- [`playos-spec/src/architecture.md`](https://github.com/your-org/playos-spec/blob/main/src/architecture.md) — shell's place in the system
+- [`playos-spec/src/playos-shell-spec.md`](https://github.com/PlayOS-Foundation/playos-spec/blob/main/src/playos-shell-spec.md) — all screens, navigation rules, launch flow, input handling
+- [`playos-spec/src/playos-overlay-spec.md`](https://github.com/PlayOS-Foundation/playos-spec/blob/main/src/playos-overlay-spec.md) — how the overlay interacts with the shell
+- [`playos-spec/src/architecture.md`](https://github.com/PlayOS-Foundation/playos-spec/blob/main/src/architecture.md) — shell's place in the system
 
 ## Shell Screen Map
 

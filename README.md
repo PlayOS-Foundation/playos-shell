@@ -45,4 +45,4 @@ Requires: `libplayos` (from `playos-platform-api`), `raylib`
 
 ## Documentation
 
-Full specification: [`playos-spec/playos-shell-spec.md`](https://github.com/your-org/playos-spec/blob/main/playos-shell-spec.md)
+Full specification: [`playos-spec/playos-shell-spec.md`](https://github.com/PlayOS-Foundation/playos-spec/blob/main/playos-shell-spec.md)
