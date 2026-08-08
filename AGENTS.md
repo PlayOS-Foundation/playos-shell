@@ -37,7 +37,7 @@ src/
 ├── screen_game_detail.c← Game detail / launch confirm screen
 ├── screen_settings.c   ← Settings screens (tabbed)
 ├── launcher.c          ← Sends launch_game over playos_session_manager protocol
-├── input.c             ← Gamepad polling via libplayos input API
+├── input.c             ← Gamepad polling via evdev backend (trusted, includes SYSTEM/QUICK_MENU)
 ├── audio_ui.c          ← UI sound effects (short clips via libplayos audio API)
 └── assets/             ← Fonts, icons, audio clips (committed as binary blobs)
 
@@ -52,7 +52,7 @@ CMakeLists.txt
 - **The shell must always be running** — it is supervised by `playos-init`. Do not call `exit()` except on unrecoverable init failure.
 - **Navigation stack discipline**: every screen push must have a corresponding pop path. There must always be a way back to HOME.
 - **Controller input only** for navigation. Do not read keyboard keycodes for navigation logic (allowed only in dev text-entry fields).
-- **No direct IPC socket access** — use `libplayos` (from `playos-platform-api`) for all runtime interaction. The shell is a trusted client, but it still goes through the Wayland protocol for surface management.
+- **No direct IPC socket access** — use `libplayos` (from `playos-platform-api`) for system, storage, lifecycle, and logging. **Exception for input:** the shell is trusted and needs SYSTEM/QUICK_MENU buttons that `libplayos` input API strips. The shell reads controller input directly through the evdev backend (see Sprint 5 review decision). Long term, this will move to a privileged compositor protocol.
 - **Launch flow**: shell sends `playos_session_manager.launch_game` → compositor handles the rest → shell receives a lifecycle event when game exits. The shell must not assume the game has started until the compositor confirms.
 - **60 fps target**: all screen renders must complete within 16ms. No blocking I/O on the render thread.
 
@@ -61,7 +61,7 @@ CMakeLists.txt
 PlayOS uses a **custom Raylib backend** (`rcore_playos.c`) instead of the default GLFW backend. This backend:
 - Creates a Wayland `wl_surface` bound via the private `playos_game_surface` protocol (shell gets a special trusted surface type).
 - Submits frames via `eglSwapBuffers` on the Wayland EGL surface.
-- Forwards controller events from `playos_input_poll()` into Raylib's input state.
+- Forwards controller events from the evdev backend into Raylib's input state. (Note: does not use `playos_input_get_controller_state()` — see input exception above.)
 
 Do not use `InitWindow()` with the default Raylib GLFW path — use `PlayOSInitDisplay()` which sets up the custom backend.
 
