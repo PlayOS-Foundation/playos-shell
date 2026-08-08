@@ -1,5 +1,7 @@
 # AGENTS.md — playos-shell
 
+> **Implementation status:** 🔴 Pre-implementation — architecture and screen map defined in `playos-spec`. No source code yet (`CONTRIBUTING.md` only). This AGENTS.md describes the **target** structure.
+
 This repository implements the **PlayOS shell** — a controller-first, fullscreen Raylib application that runs permanently as a Wayland client. It is the UI the user sees at boot and between games: the home screen, game library, settings, and system overlay trigger.
 
 ## Specification Reference
