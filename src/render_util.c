@@ -14,6 +14,8 @@
 #include <string.h>
 #include <math.h>
 
+#include "playos/playos_logging.h"
+
 /* ── Internal state ────────────────────────────────────────────────────── */
 
 static int   g_screen_w = 1920;
@@ -178,7 +180,7 @@ compile_shader(GLenum type, const char *src)
         char *log = (char *)malloc((size_t)(log_len + 1));
         if (log) {
             glGetShaderInfoLog(shader, log_len, NULL, log);
-            fprintf(stderr, "[E] shell render: shader compile error: %s\n", log);
+            PLAYOS_LOG_E("shell", "render: shader compile error: %s", log);
             free(log);
         }
         glDeleteShader(shader);
@@ -209,7 +211,7 @@ init_shaders(void)
     GLint linked;
     glGetProgramiv(g_shader_program, GL_LINK_STATUS, &linked);
     if (!linked) {
-        fprintf(stderr, "[E] shell render: shader link error\n");
+        PLAYOS_LOG_E("shell", "render: shader link error");
         glDeleteProgram(g_shader_program);
         g_shader_program = 0;
         glDeleteShader(vs);
@@ -238,7 +240,7 @@ render_init(int screen_width, int screen_height)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     if (init_shaders() != 0) {
-        fprintf(stderr, "[E] shell render: shader initialization failed\n");
+        PLAYOS_LOG_E("shell", "render: shader initialization failed");
     }
 }
 

@@ -28,6 +28,7 @@
 #include "playos/playos_system.h"
 #include "playos/playos_storage.h"
 #include "playos/playos_logging.h"
+#include "playos/playos_lifecycle.h"
 #ifdef PLAYOS_TRUSTED_IPC
 #include "playos-runtime/trusted_control.h"
 #endif
@@ -340,8 +341,12 @@ int main(int argc, char *argv[])
         {
             int cfd = playos_trusted_connect();
             if (cfd >= 0) {
-                playos_trusted_shell_ready(cfd);
+                /* Send a simple ready notification via QueryStatus —
+                 * the connection itself signals shell readiness to init */
+                char status_buf[256];
+                playos_trusted_query_status(cfd, status_buf, sizeof(status_buf));
                 playos_trusted_disconnect(cfd);
+                PLAYOS_LOG_I("shell", "shell ready notification sent");
             }
         }
 #endif
@@ -385,6 +390,27 @@ int main(int argc, char *argv[])
         /* Input */
         if (s->evdev_fd >= 0)
             shell_input_poll(s);
+
+        /* Lifecycle events from playos-init */
+        {
+            PlayOSLifecycleEvent ev;
+            int ret = playos_lifecycle_poll(&ev);
+            if (ret == 1) {
+                if (ev == PLAYOS_LIFECYCLE_TERMINATE) {
+                    PLAYOS_LOG_I("shell", "lifecycle: terminate received");
+                    s->running = false;
+                    break;
+                } else if (ev == PLAYOS_LIFECYCLE_BACKGROUND ||
+                           ev == PLAYOS_LIFECYCLE_SUSPEND) {
+                    PLAYOS_LOG_I("shell", "lifecycle: suspend/background (%d)", ev);
+                    s->is_suspended = true;
+                } else if (ev == PLAYOS_LIFECYCLE_FOREGROUND ||
+                           ev == PLAYOS_LIFECYCLE_RESUME) {
+                    PLAYOS_LOG_I("shell", "lifecycle: resume/foreground (%d)", ev);
+                    s->is_suspended = false;
+                }
+            }
+        }
 
         /* Update current screen */
         switch (s->current_screen) {

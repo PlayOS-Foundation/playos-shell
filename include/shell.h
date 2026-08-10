@@ -76,15 +76,23 @@ struct playos_shell {
 
     /* ── Game library ── */
     int    game_count;
-    char   game_ids[64][128];     /* Up to 64 games, 128-char IDs */
+    char   game_ids[64][128];         /* Up to 64 games, 128-char IDs */
+    char   game_names[64][128];       /* Display names from manifest.json */
+    char   game_versions[64][64];     /* Versions from manifest.json */
+    char   game_descriptions[64][256];/* Descriptions from manifest.json */
     int    selected_game_index;
+
+    /* ── Lifecycle ── */
+    bool   is_suspended;
 
     /* ── Settings cursor ── */
     int    settings_tab;          /* 0=display, 1=audio, 2=power, 3=system */
-
-    /* ── Trusted IPC (for game launch, status queries) ── */
-    int    ipc_fd;                /* Connected fd to /run/playos/control.sock, or -1 */
+    /* ── (ipc_fd removed — per-call connect/launch/disconnect pattern) ── */
 };
+
+/* ── Lifecycle (defined in main.c) ──────────────────────────────────── */
+
+void shell_handle_lifecycle(struct playos_shell *s);
 
 /* ── Screen functions (defined in screen_*.c) ────────────────────────── */
 

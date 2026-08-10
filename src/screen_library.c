@@ -9,11 +9,125 @@
 
 #include "shell.h"
 #include "playos/playos_storage.h"
+#include "playos/playos_logging.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+
+/* ── Minimal JSON string extractor ──────────────────────────────────────
+ * Extracts a quoted string value for a given key from a simple JSON object.
+ * Handles the constrained format used by PlayOS game manifests.
+ * Returns the number of characters written to out (excluding null), or 0. */
+static int
+json_get_string(const char *json, const char *key,
+                char *out, size_t out_sz)
+{
+    if (!json || !key || !out || out_sz == 0)
+        return 0;
+
+    /* Search for "key" */
+    char search[256];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+
+    const char *pos = strstr(json, search);
+    if (!pos)
+        return 0;
+
+    /* Move past "key": */
+    pos += strlen(search);
+    while (*pos == ' ' || *pos == ':' || *pos == '\t' || *pos == '\n')
+        pos++;
+
+    if (*pos != '"')
+        return 0;
+    pos++; /* Skip opening quote */
+
+    /* Copy until closing quote */
+    size_t i = 0;
+    while (*pos && *pos != '"' && i < out_sz - 1) {
+        /* Handle simple escape sequences */
+        if (*pos == '\\' && *(pos + 1)) {
+            pos++;
+            switch (*pos) {
+            case '"':  out[i++] = '"';  break;
+            case '\\': out[i++] = '\\'; break;
+            case 'n':  out[i++] = '\n'; break;
+            case 't':  out[i++] = '\t'; break;
+            default:   out[i++] = *pos; break;
+            }
+        } else {
+            out[i++] = *pos;
+        }
+        pos++;
+    }
+    out[i] = '\0';
+    return (int)i;
+}
+
+/* Read entire file into a malloc'd buffer. Caller must free. */
+static char *
+read_file(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return NULL;
+
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    if (sz <= 0 || sz > 65536) { /* 64KB sanity limit */
+        fclose(f);
+        return NULL;
+    }
+    rewind(f);
+
+    char *buf = (char *)malloc((size_t)sz + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+
+    size_t n = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[n] = '\0';
+    return buf;
+}
+
+/* Parse a game manifest and populate the shell game arrays at index */
+static void
+parse_manifest(struct playos_shell *s, int index, const char *manifest_path)
+{
+    char *json = read_file(manifest_path);
+    if (!json) {
+        PLAYOS_LOG_W("shell", "cannot read manifest: %s", manifest_path);
+        return;
+    }
+
+    char buf[256];
+    int len;
+
+    /* Display name — fall back to game ID if missing */
+    len = json_get_string(json, "name", buf, sizeof(buf));
+    if (len > 0) {
+        strncpy(s->game_names[index], buf, sizeof(s->game_names[index]) - 1);
+    }
+
+    /* Version */
+    len = json_get_string(json, "version", buf, sizeof(buf));
+    if (len > 0) {
+        strncpy(s->game_versions[index], buf, sizeof(s->game_versions[index]) - 1);
+    }
+
+    /* Description */
+    len = json_get_string(json, "description", buf, sizeof(buf));
+    if (len > 0) {
+        strncpy(s->game_descriptions[index], buf, sizeof(s->game_descriptions[index]) - 1);
+    }
+
+    free(json);
+}
 
 /* ── Grid layout constants ─────────────────────────────────────────────── */
 
@@ -32,16 +146,20 @@ screen_library_enter(struct playos_shell *s)
     s->game_count = 0;
     s->selected_game_index = 0;
 
+    /* Clear manifest data arrays */
+    memset(s->game_names, 0, sizeof(s->game_names));
+    memset(s->game_versions, 0, sizeof(s->game_versions));
+    memset(s->game_descriptions, 0, sizeof(s->game_descriptions));
+
     const char *games_path = playos_storage_get_games_path();
     if (!games_path) {
-        fprintf(stderr, "[W] shell library: playos_storage_get_games_path() "
-                "returned NULL — no games directory available\n");
+        PLAYOS_LOG_W("shell", "library: get_games_path() returned NULL");
         return;
     }
 
     DIR *dir = opendir(games_path);
     if (!dir) {
-        fprintf(stderr, "[W] shell library: cannot open %s\n", games_path);
+        PLAYOS_LOG_W("shell", "library: cannot open %s", games_path);
         return;
     }
 
@@ -61,16 +179,28 @@ screen_library_enter(struct playos_shell *s)
             continue;
 
         /* Store game ID */
-        strncpy(s->game_ids[s->game_count], entry->d_name,
+        int idx = s->game_count;
+        strncpy(s->game_ids[idx], entry->d_name,
                 sizeof(s->game_ids[0]) - 1);
-        s->game_ids[s->game_count][sizeof(s->game_ids[0]) - 1] = '\0';
+        s->game_ids[idx][sizeof(s->game_ids[0]) - 1] = '\0';
+
+        /* Default display name = game ID (fallback if no manifest) */
+        strncpy(s->game_names[idx], entry->d_name,
+                sizeof(s->game_names[0]) - 1);
+
+        /* Try to parse manifest.json */
+        char manifest_path[640];
+        snprintf(manifest_path, sizeof(manifest_path),
+                 "%s/manifest.json", full_path);
+        parse_manifest(s, idx, manifest_path);
+
         s->game_count++;
     }
 
     closedir(dir);
 
-    fprintf(stderr, "[I] shell library: found %d games in %s\n",
-            s->game_count, games_path);
+    PLAYOS_LOG_I("shell", "library: found %d games in %s",
+                 s->game_count, games_path);
 }
 
 /* ── Update: controller navigation ────────────────────────────────────── */
@@ -163,19 +293,21 @@ draw_game_card(struct playos_shell *s, int index,
                      icon_y + icon_size * 0.35f,
                      q_scale, 0.5f, 0.5f, 0.5f, 1.0f);
 
-    /* Game title (truncated) */
-    const char *game_id = s->game_ids[index];
+    /* Game title (use display name from manifest, fallback to game ID) */
+    const char *display_name = s->game_names[index];
+    if (!display_name[0])
+        display_name = s->game_ids[index];
     float title_scale = 2.2f;
-    float title_w = render_text_width(game_id, title_scale);
+    float title_w = render_text_width(display_name, title_scale);
     float title_max_w = card_w - 16.0f;
 
     if (title_w > title_max_w) {
         /* Truncate with "..." — simple approach: reduce scale */
         title_scale *= title_max_w / title_w;
-        title_w = render_text_width(game_id, title_scale);
+        title_w = render_text_width(display_name, title_scale);
     }
 
-    render_draw_text(game_id,
+    render_draw_text(display_name,
                      x + (card_w - title_w) * 0.5f,
                      icon_y + icon_size + 12.0f,
                      title_scale,

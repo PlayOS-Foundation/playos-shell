@@ -8,6 +8,7 @@
  */
 
 #include "shell.h"
+#include "playos/playos_logging.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -21,8 +22,10 @@
 void
 screen_game_detail_enter(struct playos_shell *s)
 {
-    fprintf(stderr, "[I] shell game_detail: viewing game '%s'\n",
-            s->game_ids[s->selected_game_index]);
+    const char *display_name = s->game_names[s->selected_game_index];
+    PLAYOS_LOG_I("shell", "game_detail: viewing '%s' (id: %s)",
+                 display_name[0] ? display_name : s->game_ids[s->selected_game_index],
+                 s->game_ids[s->selected_game_index]);
 }
 
 /* ── Update ────────────────────────────────────────────────────────────── */
@@ -34,16 +37,26 @@ screen_game_detail_update(struct playos_shell *s)
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
         const char *game_id = s->game_ids[s->selected_game_index];
 #ifdef PLAYOS_TRUSTED_IPC
-        fprintf(stderr, "[I] shell game_detail: LAUNCH '%s' via IPC\n", game_id);
-        int ret = playos_trusted_launch_game(s->ipc_fd, game_id);
-        if (ret == 0) {
-            fprintf(stderr, "[I] shell game_detail: launch accepted\n");
+        PLAYOS_LOG_I("shell", "game_detail: launching '%s' via IPC", game_id);
+
+        /* Per-call connect/launch/disconnect (same pattern as shell_ready) */
+        int fd = playos_trusted_connect();
+        if (fd >= 0) {
+            int ret = playos_trusted_launch_game(fd, game_id);
+            playos_trusted_disconnect(fd);
+            if (ret == 0) {
+                PLAYOS_LOG_I("shell", "game_detail: launch accepted for '%s'",
+                             game_id);
+            } else {
+                PLAYOS_LOG_E("shell", "game_detail: launch failed for '%s'",
+                             game_id);
+            }
         } else {
-            fprintf(stderr, "[E] shell game_detail: launch failed for '%s'\n", game_id);
+            PLAYOS_LOG_E("shell", "game_detail: cannot connect to IPC for launch");
         }
 #else
-        fprintf(stderr, "[I] shell game_detail: LAUNCH requested for '%s' "
-                "(IPC not available)\n", game_id);
+        PLAYOS_LOG_W("shell", "game_detail: launch requested for '%s' "
+                     "(IPC not available)", game_id);
 #endif
         /* Stay on this screen */
     }
@@ -71,14 +84,28 @@ screen_game_detail_draw(struct playos_shell *s)
     float sub_scale   = title_scale * 0.4f;
     float hint_scale  = sub_scale * 0.8f;
 
-    /* ── Game title ── */
-    const char *game_id = s->game_ids[s->selected_game_index];
-    float title_w = render_text_width(game_id, title_scale);
+    /* ── Game title (display name from manifest, fallback to id) ── */
+    int idx = s->selected_game_index;
+    const char *display_name = s->game_names[idx];
+    if (!display_name[0])
+        display_name = s->game_ids[idx];
+
+    float title_w = render_text_width(display_name, title_scale);
     float title_x = ((float)w - title_w) * 0.5f;
     float title_y = (float)h * 0.10f;
 
-    render_draw_text(game_id, title_x, title_y, title_scale,
+    render_draw_text(display_name, title_x, title_y, title_scale,
                      1.0f, 1.0f, 1.0f, 1.0f);
+
+    /* ── Version subtitle ── */
+    if (s->game_versions[idx][0]) {
+        char ver[128];
+        snprintf(ver, sizeof(ver), "v%s", s->game_versions[idx]);
+        float ver_w = render_text_width(ver, sub_scale);
+        render_draw_text(ver, ((float)w - ver_w) * 0.5f,
+                         title_y + title_scale * 12.0f,
+                         sub_scale, 0.4f, 0.6f, 0.8f, 1.0f);
+    }
 
     /* ── Icon placeholder ── */
     float icon_size = 160.0f;
@@ -96,9 +123,11 @@ screen_game_detail_draw(struct playos_shell *s)
                      icon_y + icon_size * 0.35f,
                      q_scale, 0.5f, 0.5f, 0.5f, 1.0f);
 
-    /* ── Description placeholder ── */
+    /* ── Description from manifest (fallback to placeholder) ── */
     float desc_y = icon_y + icon_size + 20.0f;
-    const char *desc = "No description available.";
+    const char *desc = s->game_descriptions[idx];
+    if (!desc[0])
+        desc = "No description available.";
     float desc_w = render_text_width(desc, sub_scale);
     render_draw_text(desc, ((float)w - desc_w) * 0.5f, desc_y,
                      sub_scale, 0.5f, 0.5f, 0.6f, 1.0f);
