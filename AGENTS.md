@@ -1,6 +1,6 @@
 # AGENTS.md — playos-shell
 
-> **Implementation status:** 🟡 Partial implementation — EGL/GLES2 shell renders and navigates with frame-callback vsync. Hybrid input: Platform API for standard controls, raw evdev for reserved SYSTEM/QUICK_MENU buttons. Screen stubs exist (home, library, game_detail, settings). Raylib integration deferred; direct EGL/GLES2 used instead.
+> **Implementation status:** 🟡 Partial implementation — EGL/GLES2 shell renders and navigates with frame-callback vsync. Hybrid input: Platform API for standard controls (always polled, independent fd), raw evdev for reserved SYSTEM/QUICK_MENU buttons (auto-retry on device discovery failure). Manifest JSON parsing added for game names/versions/descriptions. Lifecycle events handled (TERMINATE, SUSPEND, RESUME). Per-call IPC pattern for game launch. Stub manifests in refdistro overlay. Raylib integration deferred; direct EGL/GLES2 used instead.
 
 This repository implements the **PlayOS shell** — a controller-first, fullscreen EGL/GLES2 application that runs permanently as a Wayland client. It is the UI the user sees at boot and between games: the home screen, game library, settings, and system overlay trigger.
 
@@ -72,13 +72,19 @@ The main loop uses `wl_surface_frame` + `wl_display_dispatch` for presentation p
 
 This is the standard Wayland vsync pattern — no busy-waiting, no `usleep` heuristics.
 
-## Input (Sprint 5 — Hybrid)
+## Input (Sprint 5 — Direct Evdev)
 
-Standard buttons and axes come from the **Platform API** (`playos_input_get_controller_state()`), which provides proper dead-zone handling and dynamic trigger range. Only reserved buttons (SYSTEM / QUICK_MENU) are read from raw evdev, since the Platform API strips those for game processes. The shell is trusted and needs them for overlay and home-button functionality.
+All controller input is read **directly from evdev** (`/dev/input/event*`) by `shell_input_poll()` in `src/input.c`. This is the Sprint 5 pragmatic approach (S5-T5 option 1): the shell opens its own fd, decodes all standard buttons (face buttons, d-pad via both ABS_HAT and BTN_DPAD_* forms, shoulders, stick clicks) and reserved buttons (SYSTEM/QUICK_MENU), and does not depend on the Platform API input path (which strips reserved buttons and uses a separate fd with different detection criteria).
 
-Reserved button mapping:
-- `BTN_MODE` → `PLAYOS_BUTTON_SYSTEM`
-- `KEY_PROG1`, `KEY_PROG2`, `KEY_LEFTMETA`, `KEY_RIGHTMETA`, `BTN_TRIGGER_HAPPY1` → `PLAYOS_BUTTON_QUICK_MENU`
+**Device discovery:** `find_gamepad_device()` scans `/dev/input/event*`, prefers Xbox/ASUS/ROG Ally named devices, falls back to first viable gamepad. Auto-retries on each frame if the initial discovery failed (driver not yet loaded at startup).
+
+Button mappings:
+- `BTN_SOUTH`/`BTN_EAST`/`BTN_WEST`/`BTN_NORTH` → face buttons (A/B/X/Y)
+- `BTN_DPAD_*` or `ABS_HAT0X/Y` → d-pad (both forms handled, mutually exclusive)
+- `BTN_TL`/`BTN_TR` → L1/R1, `BTN_THUMBL`/`BTN_THUMBR` → L3/R3
+- `BTN_START`/`BTN_SELECT` → start/select
+- `BTN_MODE` → `PLAYOS_BUTTON_SYSTEM` (reserved)
+- `KEY_PROG1`/`KEY_PROG2`/`KEY_LEFTMETA`/`KEY_RIGHTMETA`/`BTN_TRIGGER_HAPPY1` → `PLAYOS_BUTTON_QUICK_MENU` (reserved)
 
 ## Code Conventions
 

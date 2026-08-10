@@ -387,9 +387,8 @@ int main(int argc, char *argv[])
         struct timespec frame_start;
         clock_gettime(CLOCK_MONOTONIC, &frame_start);
 
-        /* Input */
-        if (s->evdev_fd >= 0)
-            shell_input_poll(s);
+        /* Input — direct evdev, all buttons decoded in shell_input_poll() */
+        shell_input_poll(s);
 
         /* Lifecycle events from playos-init */
         {

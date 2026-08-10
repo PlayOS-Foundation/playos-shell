@@ -1,10 +1,12 @@
 /**
- * input.c — Direct evdev controller input (trusted, keeps reserved buttons)
+ * input.c — Direct evdev controller input (trusted)
  *
- * The shell reads controller input directly from /dev/input/event* because
- * libplayos' input API strips PLAYOS_BUTTON_SYSTEM and PLAYOS_BUTTON_QUICK_MENU
- * from game processes. The shell is trusted and needs those buttons for
- * quick-menu (overlay) and home-button functionality.
+ * The shell reads ALL controller input directly from /dev/input/event*.
+ * This is the pragmatic Sprint 5 approach (S5-T5 option 1): the shell
+ * is a trusted system component and needs reserved buttons (SYSTEM/QUICK_MENU)
+ * that libplayos' input API strips from game processes. The shell opens
+ * its own fd and decodes standard face buttons, d-pad (both ABS_HAT and
+ * BTN_DPAD_* forms), shoulder buttons, stick clicks, and reserved buttons.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,8 +45,10 @@
 /* ── Finding the gamepad ─────────────────────────────────────────────── */
 
 /* Quick check: does this event device have the gamepad axes + buttons?
- * Xbox controllers always have ABS_X, ABS_Y, ABS_RX, ABS_RY, ABS_HAT0X,
- * and BTN_SOUTH/BTN_EAST/etc. */
+ * Xbox controllers always have ABS_X, ABS_Y, ABS_RX, ABS_RY,
+ * and BTN_SOUTH/BTN_EAST/etc.
+ * D-pad may be ABS_HAT0X/Y (Xbox) or BTN_DPAD_* (some drivers).
+ * Accept either form. */
 static int is_gamepad_device(int fd)
 {
     unsigned long abs_bits[EVDEV_BITS(ABS_MAX)] = {0};
@@ -55,14 +59,18 @@ static int is_gamepad_device(int fd)
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) < 0)
         return 0;
 
-    /* Must have sticks and dpad */
+    /* Must have sticks */
     if (!TEST_BIT(ABS_X, abs_bits) || !TEST_BIT(ABS_Y, abs_bits))
-        return 0;
-    if (!TEST_BIT(ABS_HAT0X, abs_bits) && !TEST_BIT(ABS_HAT0Y, abs_bits))
         return 0;
 
     /* Must have at least the face buttons */
     if (!TEST_BIT(BTN_SOUTH, key_bits))
+        return 0;
+
+    /* D-pad: accept ABS_HAT or BTN_DPAD_* */
+    int has_hat = TEST_BIT(ABS_HAT0X, abs_bits) || TEST_BIT(ABS_HAT0Y, abs_bits);
+    int has_dpad_btns = TEST_BIT(BTN_DPAD_UP, key_bits) || TEST_BIT(BTN_DPAD_DOWN, key_bits);
+    if (!has_hat && !has_dpad_btns)
         return 0;
 
     return 1;
@@ -99,8 +107,10 @@ static int find_gamepad_device(void)
             if (strstr(name, "Xbox") || strstr(name, "xbox") ||
                 strstr(name, "X-Box") ||
                 strstr(name, "Microsoft") ||
-                strstr(name, "ASUE") ||    /* ASUS ROG Ally */
-                strstr(name, "ROG Ally")) {
+                strstr(name, "ASUE") ||        /* ASUS ROG Ally (all models) */
+                strstr(name, "ASUS") ||
+                strstr(name, "ROG Ally") ||
+                strstr(name, "Gamepad")) {     /* Catch "ASUE* Gamepad" etc. */
                 PLAYOS_LOG_I("input", "found gamepad: %s (%s)", name, path);
                 closedir(dir);
                 return fd;
@@ -141,46 +151,131 @@ int shell_input_init(struct playos_shell *s)
 
 void shell_input_poll(struct playos_shell *s)
 {
-    if (s->evdev_fd < 0)
-        return;
-
     /* Save previous state for edge detection */
     s->controller_prev = s->controller;
 
-    /* Get standard controller state from Platform API (Sprint 5).
-     * This provides all buttons (except SYSTEM/QUICK_MENU which are
-     * stripped by the API) and all axes with proper dead-zone / range
-     * normalization, rather than using ROG Ally-specific raw evdev codes. */
-    playos_input_get_controller_state(&s->controller);
+    /* Auto-retry device discovery if fd is not open.
+     * The controller device may appear later (driver load, hotplug). */
+    if (s->evdev_fd < 0) {
+        s->evdev_fd = find_gamepad_device();
+    }
 
-    /* Read raw evdev ONLY for reserved buttons the Platform API strips.
-     * The shell is trusted and needs SYSTEM (Xbox/Guide) and QUICK_MENU
-     * (Ally Armoury Crate / CC button) for overlay and home functionality. */
+    if (s->evdev_fd < 0)
+        return;
+
     struct input_event ev;
     ssize_t n;
 
     while ((n = read(s->evdev_fd, &ev, sizeof(ev))) == sizeof(ev)) {
         switch (ev.type) {
         case EV_KEY:
-            /* Xbox/Guide button → PLAYOS_BUTTON_SYSTEM */
-            if (ev.code == BTN_MODE) {
-                if (ev.value)
-                    s->controller.buttons |= PLAYOS_BUTTON_SYSTEM;
-                else
-                    s->controller.buttons &= ~PLAYOS_BUTTON_SYSTEM;
-            }
-            /* Ally quick-menu (Armoury Crate) and other reserved key paths */
-            else if (ev.code == KEY_PROG1 || ev.code == KEY_PROG2 ||
-                     ev.code == KEY_LEFTMETA || ev.code == KEY_RIGHTMETA ||
-                     ev.code == BTN_TRIGGER_HAPPY1) {
-                if (ev.value)
-                    s->controller.buttons |= PLAYOS_BUTTON_QUICK_MENU;
-                else
-                    s->controller.buttons &= ~PLAYOS_BUTTON_QUICK_MENU;
+            switch (ev.code) {
+            /* ── Face buttons ── */
+            case BTN_SOUTH:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SOUTH;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_SOUTH;
+                break;
+            case BTN_EAST:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_EAST;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_EAST;
+                break;
+            case BTN_WEST:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_WEST;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_WEST;
+                break;
+            case BTN_NORTH:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_NORTH;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_NORTH;
+                break;
+
+            /* ── Start / Select ── */
+            case BTN_START:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_START;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_START;
+                break;
+            case BTN_SELECT:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SELECT;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_SELECT;
+                break;
+
+            /* ── Shoulder buttons / triggers ── */
+            case BTN_TL:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_L1;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_L1;
+                break;
+            case BTN_TR:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_R1;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_R1;
+                break;
+
+            /* ── Stick clicks ── */
+            case BTN_THUMBL:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_L3;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_L3;
+                break;
+            case BTN_THUMBR:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_R3;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_R3;
+                break;
+
+            /* ── D-pad as buttons (hid-asus and some drivers) ── */
+            case BTN_DPAD_UP:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_UP;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_UP;
+                break;
+            case BTN_DPAD_DOWN:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_DOWN;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_DOWN;
+                break;
+            case BTN_DPAD_LEFT:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_LEFT;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_LEFT;
+                break;
+            case BTN_DPAD_RIGHT:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_RIGHT;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_RIGHT;
+                break;
+
+            /* ── Reserved: SYSTEM (Xbox Guide) ── */
+            case BTN_MODE:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SYSTEM;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_SYSTEM;
+                break;
+
+            /* ── Reserved: QUICK_MENU (Ally Armoury Crate / CC) ── */
+            case KEY_PROG1:
+            case KEY_PROG2:
+            case KEY_LEFTMETA:
+            case KEY_RIGHTMETA:
+            case BTN_TRIGGER_HAPPY1:
+                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_QUICK_MENU;
+                else          s->controller.buttons &= ~PLAYOS_BUTTON_QUICK_MENU;
+                break;
             }
             break;
+
+        case EV_ABS:
+            /* D-pad as ABS_HAT (xpad driver).
+             * Mutually exclusive: LEFT clears RIGHT, UP clears DOWN. */
+            if (ev.code == ABS_HAT0X) {
+                s->controller.buttons &= ~(PLAYOS_BUTTON_DPAD_LEFT |
+                                           PLAYOS_BUTTON_DPAD_RIGHT);
+                if (ev.value < 0)
+                    s->controller.buttons |= PLAYOS_BUTTON_DPAD_LEFT;
+                else if (ev.value > 0)
+                    s->controller.buttons |= PLAYOS_BUTTON_DPAD_RIGHT;
+            } else if (ev.code == ABS_HAT0Y) {
+                s->controller.buttons &= ~(PLAYOS_BUTTON_DPAD_UP |
+                                           PLAYOS_BUTTON_DPAD_DOWN);
+                if (ev.value < 0)
+                    s->controller.buttons |= PLAYOS_BUTTON_DPAD_UP;
+                else if (ev.value > 0)
+                    s->controller.buttons |= PLAYOS_BUTTON_DPAD_DOWN;
+            }
+            break;
+
         case EV_SYN:
-            goto done; /* Process one frame's worth of reserved-button events */
+            goto done; /* Process one frame's worth of events */
         }
     }
 done:
