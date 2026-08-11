@@ -76,7 +76,7 @@ This is the standard Wayland vsync pattern — no busy-waiting, no `usleep` heur
 
 All controller input is read **directly from evdev** (`/dev/input/event*`) by `shell_input_poll()` in `src/input.c`. This is the Sprint 5 pragmatic approach (S5-T5 option 1): the shell opens its own fd, decodes all standard buttons (face buttons, d-pad via both ABS_HAT and BTN_DPAD_* forms, shoulders, stick clicks) and reserved buttons (SYSTEM/QUICK_MENU), and does not depend on the Platform API input path (which strips reserved buttons and uses a separate fd with different detection criteria).
 
-**Device discovery:** `find_gamepad_device()` scans `/dev/input/event*`, prefers Xbox/ASUS/ROG Ally named devices, falls back to first viable gamepad. Auto-retries on each frame if the initial discovery failed (driver not yet loaded at startup).
+**Device detection:** `is_gamepad_device()` requires all 4 stick axes (`ABS_X`, `ABS_Y`, `ABS_RX`, `ABS_RY`) and `BTN_SOUTH` face button — matches the Platform API detection criteria in `backend_evdev.c`. No d-pad capability bits required (hid-asus on ROG Ally may not advertise them). **Device discovery:** `find_gamepad_device()` scans `/dev/input/event*`, prefers Xbox/ASUS/ROG Ally named devices, falls back to first viable gamepad. Auto-retries on each frame if the initial discovery failed (driver not yet loaded at startup).
 
 Button mappings:
 - `BTN_SOUTH`/`BTN_EAST`/`BTN_WEST`/`BTN_NORTH` → face buttons (A/B/X/Y)
