@@ -1,8 +1,8 @@
 # AGENTS.md — playos-shell
 
-> **Implementation status:** 🟡 Partial implementation — EGL/GLES2 shell renders and navigates with frame-callback vsync. Hybrid input: Platform API for standard controls (always polled, independent fd), raw evdev for reserved SYSTEM/QUICK_MENU buttons (auto-retry on device discovery failure). Manifest JSON parsing added for game names/versions/descriptions. Lifecycle events handled (TERMINATE, SUSPEND, RESUME). Per-call IPC pattern for game launch. Stub manifests in refdistro overlay. Raylib integration deferred; direct EGL/GLES2 used instead.
+> **Implementation status:** 🟡 Partial implementation — Raylib 6.0 shell renders and navigates with frame-callback vsync via the custom `rcore_playos.c` backend (Sprint 5.5). Direct evdev input for all controller buttons including reserved SYSTEM/QUICK_MENU (auto-retry on device discovery failure). Manifest JSON parsing added for game names/versions/descriptions. Lifecycle events handled (TERMINATE, SUSPEND, RESUME). Per-call IPC pattern for game launch. Stub manifests in refdistro overlay.
 
-This repository implements the **PlayOS shell** — a controller-first, fullscreen EGL/GLES2 application that runs permanently as a Wayland client. It is the UI the user sees at boot and between games: the home screen, game library, settings, and system overlay trigger.
+This repository implements the **PlayOS shell** — a controller-first, fullscreen Raylib 6.0 application that runs permanently as a Wayland client (EGL/GLES2 driven by the vendored Raylib PlayOS backend). It is the UI the user sees at boot and between games: the home screen, game library, settings, and system overlay trigger.
 
 ## Specification Reference
 
@@ -30,13 +30,16 @@ The `B` button always means "back". The `A` button means "select/confirm".
 
 ```
 src/
-├── main.c              ← Entry point, EGL/GLES2 init, Wayland client setup, frame-callback vsync loop
-├── input.c             ← Hybrid input: Platform API for standard buttons/axes, raw evdev for SYSTEM/QUICK_MENU
+├── main.c              ← Entry point: shell state, evdev input, lifecycle poll, screen update/draw loop
+├── input.c             ← Direct evdev input: all standard buttons/axes + reserved SYSTEM/QUICK_MENU
 ├── screen_home.c       ← Home screen render + input (stub)
 ├── screen_library.c    ← Game library grid render + input (stub)
 ├── screen_game_detail.c← Game detail / launch confirm screen (stub)
 ├── screen_settings.c   ← Settings screens / tabbed (stub)
-└── render_util.c       ← GLES2 text+rect helpers (no external font/texture lib)
+└── render_util.c       ← Thin Raylib wrappers (BeginDrawing/EndDrawing, DrawRectangleRec, DrawTextEx)
+
+external/raylib/
+└── src/platforms/rcore_playos.c  ← Raylib 6.0 PlayOS backend (Wayland/EGL/GLES2, frame pacing)
 
 include/
 └── shell.h             ← Screen enum, navigation stack, global state struct
@@ -53,24 +56,27 @@ CMakeLists.txt
 - **Launch flow**: shell sends `playos_session_manager.launch_game` → compositor handles the rest → shell receives a lifecycle event when game exits. The shell must not assume the game has started until the compositor confirms.
 - **60 fps target**: all screen renders must complete within 16ms. No blocking I/O on the render thread.
 
-## Rendering
+## Rendering (Sprint 5.5 — Raylib 6.0)
 
-The shell currently uses **raw EGL/GLES2** (not Raylib). EGL surfaces are created directly via `wl_egl_window_create` + `eglCreateWindowSurface`. Rendering is done with GLES2 draw calls in `render_util.c` (rectangles, text via a built-in bitmap font).
+Rendering is done by **vendored Raylib 6.0** through a custom PlayOS platform backend, `external/raylib/src/platforms/rcore_playos.c` (registered as `PLATFORM_PLAYOS`). The shell no longer manages EGL surfaces/contexts directly.
 
-Raylib integration is deferred to a future sprint. When integrated, it will use a custom backend (`rcore_playos.c`) instead of the default GLFW backend:
-- Creates a Wayland `wl_surface` bound via the private `playos_game_surface` protocol.
-- Submits frames via `eglSwapBuffers` on the Wayland EGL surface.
-- Forwards controller events into Raylib's input state.
+The backend owns:
+- Wayland connection + `wl_compositor`/`xdg_wm_base`/`playos_manager_v1` globals
+- A fullscreen `xdg_toplevel` surface (no decorations, no resize)
+- `wl_egl_window` + EGL/GLES2 context (made current before raylib's `rlgl` init)
+- Frame pacing and buffer swap
 
-## Frame Callback Vsync (Sprint 5)
+`render_util.c` is a thin wrapper over raylib draw calls (`BeginDrawing`/`ClearBackground`, `DrawRectangleRec`, `DrawTextEx`/`MeasureTextEx` with `GetFontDefault()`). The retired 5×7 bitmap font and raw GLSL shaders are gone.
 
-The main loop uses `wl_surface_frame` + `wl_display_dispatch` for presentation pacing:
+## Frame Callback Vsync
+
+Frame pacing uses the standard Wayland vsync pattern inside `rcore_playos.c`'s `SwapScreenBuffer()` (called by raylib's `EndDrawing()`):
 1. Request a frame callback via `wl_surface_frame(surface)`.
 2. Commit the surface to trigger callback delivery.
 3. Block in `wl_display_dispatch()` until the compositor signals readiness (callback fires, sets `frame_pending = false`).
-4. Render → `eglSwapBuffers` → next callback requested.
+4. `eglSwapBuffers()` on the Wayland EGL surface.
 
-This is the standard Wayland vsync pattern — no busy-waiting, no `usleep` heuristics.
+No busy-waiting, no `usleep` heuristics.
 
 ## Input (Sprint 5 — Direct Evdev)
 
@@ -88,7 +94,7 @@ Button mappings:
 
 ## Code Conventions
 
-- C99. Link against libplayos, libwayland-client, libwayland-egl, libEGL, libGLESv2. (Raylib deferred.)
+- C99. Link against libplayos and the vendored Raylib 6.0 static library (which itself links libwayland-client, libwayland-egl, libEGL, libGLESv2).
 - All screen modules expose exactly three functions: `screen_NAME_enter()`, `screen_NAME_update()`, `screen_NAME_draw()`.
 - Global shell state is in a single `struct playos_shell` — no global mutable variables outside it.
 - Asset loading happens at startup (`screen_NAME_enter`), not per-frame.
