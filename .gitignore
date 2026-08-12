@@ -5,12 +5,14 @@ build/
 *.so
 *.so.*
 
-# CMake
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-*.cmake
+# CMake (generated files — scoped to build dirs so vendored
+# sources under external/ that legitimately ship Makefile/*.cmake
+# are not accidentally excluded)
+build/CMakeFiles/
+build/CMakeCache.txt
+build/cmake_install.cmake
+build/Makefile
+build/*.cmake
 
 # Generated Wayland protocol files
 gen/
