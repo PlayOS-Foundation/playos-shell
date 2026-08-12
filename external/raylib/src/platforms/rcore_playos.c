@@ -466,18 +466,28 @@ void DisableCursor(void)
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void)
 {
-    // Wayland vsync: arm a frame callback, commit, then block until the
-    // compositor signals readiness for the next frame.
-    if (platform.wl_surface) {
-        platform.frame_callback = wl_surface_frame(platform.wl_surface);
-        wl_callback_add_listener(platform.frame_callback, &frame_callback_listener, NULL);
-        platform.frame_pending = true;
-        wl_surface_commit(platform.wl_surface);
-
+    // Wayland vsync: wait for the previous frame to be presented (the
+    // callback is armed below, after eglSwapBuffers attaches a buffer),
+    // then present the newly drawn frame.
+    if (platform.wl_surface && platform.frame_pending) {
         while (platform.frame_pending && (wl_display_dispatch(platform.wl_display) >= 0)) { }
     }
 
     eglSwapBuffers(platform.egl_display, platform.egl_surface);
+
+    // Arm the frame callback for the frame just presented. Blocking on a
+    // callback for a bufferless commit (the old code committed before the
+    // first eglSwapBuffers) deadlocks: an unmapped surface is never
+    // presented, so its frame callback never fires.
+    if (platform.wl_surface) {
+        if (platform.frame_callback) {
+            wl_callback_destroy(platform.frame_callback);
+            platform.frame_callback = NULL;
+        }
+        platform.frame_callback = wl_surface_frame(platform.wl_surface);
+        wl_callback_add_listener(platform.frame_callback, &frame_callback_listener, NULL);
+        platform.frame_pending = true;
+    }
 }
 
 //----------------------------------------------------------------------------------
