@@ -191,6 +191,21 @@ elseif ("${PLATFORM}" STREQUAL "Memory")
     if(WIN32 OR CMAKE_C_COMPILER MATCHES "mingw|mingw32|mingw64")
         set(LIBS_PRIVATE winmm)
     endif()
+
+elseif ("${PLATFORM}" STREQUAL "PlayOS")
+    set(PLATFORM_CPP "PLATFORM_PLAYOS")
+    set(GRAPHICS "GRAPHICS_API_OPENGL_ES2")
+
+    add_definitions(-DEGL_NO_X11)
+    add_definitions(-D_DEFAULT_SOURCE)
+
+    find_library(WAYLAND_CLIENT_LIBRARY wayland-client)
+    find_library(WAYLAND_EGL_LIBRARY wayland-egl)
+    find_library(EGL_LIBRARY EGL)
+    find_library(GLESV2_LIBRARY GLESv2)
+
+    set(LIBS_PRIVATE ${WAYLAND_CLIENT_LIBRARY} ${WAYLAND_EGL_LIBRARY} ${EGL_LIBRARY} ${GLESV2_LIBRARY} atomic pthread dl)
+    set(LIBS_PUBLIC m)
 endif ()
 
 if (NOT ${OPENGL_VERSION} MATCHES "OFF")

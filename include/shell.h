@@ -7,15 +7,14 @@
 #ifndef PLAYOS_SHELL_H
 #define PLAYOS_SHELL_H
 
-#include <wayland-client.h>
-#include <wayland-egl.h>
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
 #include <stdbool.h>
 #include <time.h>
 
 #include "playos/playos_input.h"
-#include "playos-v1-client-protocol.h"
+
+/* Forward declaration: bound by the Raylib PlayOS backend (rcore_playos.c)
+ * and consumed by main.c for the trusted-shell registration handshake. */
+struct playos_manager_v1;
 
 /* ── Screen enum ─────────────────────────────────────────────────────── */
 
@@ -29,26 +28,6 @@ enum playos_screen {
 /* ── Central shell state ─────────────────────────────────────────────── */
 
 struct playos_shell {
-    /* ── Wayland ── */
-    struct wl_display    *display;
-    struct wl_registry   *registry;
-    struct wl_compositor *compositor;
-    struct xdg_wm_base   *xdg_wm_base;
-    struct wl_surface    *surface;
-    struct xdg_surface   *xdg_surface;
-    struct xdg_toplevel  *xdg_toplevel;
-    struct wl_egl_window *egl_window;
-
-    /* ── EGL ── */
-    EGLDisplay  egl_display;
-    EGLSurface  egl_surface;
-    EGLContext  egl_context;
-    EGLConfig   egl_config;
-
-    /* ── PlayOS protocol ── */
-    struct playos_manager_v1 *playos_manager;
-    struct playos_shell_v1   *playos_shell_iface;
-
     /* ── Screens ── */
     enum playos_screen current_screen;
     enum playos_screen previous_screen;
@@ -69,10 +48,6 @@ struct playos_shell {
     struct timespec start_time;
     double          frame_time;
     double          elapsed_time;
-
-    /* ── Frame callback (Wayland vsync) ── */
-    struct wl_callback *frame_callback;
-    bool                frame_pending;
 
     /* ── Game library ── */
     int    game_count;
@@ -121,9 +96,12 @@ int  shell_input_button_pressed(const struct playos_shell *s,
 int  shell_input_button_released(const struct playos_shell *s,
                                  playos_button_mask_t button);
 
+/* ── Raylib PlayOS backend accessor (defined in rcore_playos.c) ──────── */
+
+struct playos_manager_v1 *platform_get_playos_manager(void);
+
 /* ── Render utilities (defined in render_util.c) ─────────────────────── */
 
-void render_init(int screen_width, int screen_height);
 void render_draw_rect(float x, float y, float w, float h,
                       float r, float g, float b, float a);
 void render_draw_text(const char *text, float x, float y,

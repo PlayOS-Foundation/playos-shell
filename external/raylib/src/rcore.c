@@ -548,6 +548,8 @@ const char *TextFormat(const char *text, ...); // Formatting of text with variab
     #include "platforms/rcore_drm.c"
 #elif defined(PLATFORM_ANDROID)
     #include "platforms/rcore_android.c"
+#elif defined(PLATFORM_PLAYOS)
+    #include "platforms/rcore_playos.c"
 #elif defined(PLATFORM_MEMORY)
     #include "platforms/rcore_memory.c"
 #else
@@ -624,6 +626,8 @@ void InitWindow(int width, int height, const char *title)
     TRACELOG(LOG_INFO, "Platform backend: NATIVE DRM");
 #elif defined(PLATFORM_ANDROID)
     TRACELOG(LOG_INFO, "Platform backend: ANDROID");
+#elif defined(PLATFORM_PLAYOS)
+    TRACELOG(LOG_INFO, "Platform backend: PLAYOS (Wayland + EGL/GLES2)");
 #elif defined(PLATFORM_MEMORY)
     TRACELOG(LOG_INFO, "Platform backend: MEMORY (No OS)");
 #else
