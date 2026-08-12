@@ -586,7 +586,7 @@ void PollInputEvents(void)
 
 // Get the bound playos_manager_v1 proxy (may be NULL if the compositor does
 // not advertise the PlayOS manager global).
-struct playos_manager_v1 *platform_get_playos_manager(void)
+RLAPI struct playos_manager_v1 *platform_get_playos_manager(void)
 {
     return platform.playos_manager;
 }
