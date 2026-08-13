@@ -1,15 +1,18 @@
 /**
  * screen_library.c — Game library browser for PlayOS Shell
  *
- * Scans /data/games for installed titles, renders a controller-navigable
- * grid with selection highlighting.
+ * Scans /data/games for installed titles, validates each game manifest,
+ * renders a controller-navigable grid with selection highlighting, and
+ * shows per-game icon art when assets/icon.png is present.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "shell.h"
+#include "playos/playos.h"
 #include "playos/playos_storage.h"
 #include "playos/playos_logging.h"
+#include "raylib.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +20,11 @@
 #include <math.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
+
+/* ── Per-game icon textures (GPU side) ─────────────────────────────────── */
+static Texture2D s_game_icons[64];
+static bool     s_game_icons_loaded[64];
 
 /* ── Minimal JSON string extractor ──────────────────────────────────────
  * Extracts a quoted string value for a given key from a simple JSON object.
@@ -68,6 +76,49 @@ json_get_string(const char *json, const char *key,
     return (int)i;
 }
 
+/* Minimal JSON integer extractor for game manifests. Returns 1 on success. */
+static int
+json_get_int(const char *json, const char *key, int *out)
+{
+    if (!json || !key || !out)
+        return 0;
+
+    char search[256];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+
+    const char *pos = strstr(json, search);
+    if (!pos)
+        return 0;
+
+    pos += strlen(search);
+    while (*pos == ' ' || *pos == ':' || *pos == '\t' || *pos == '\n')
+        pos++;
+
+    if (!(*pos == '-' || (*pos >= '0' && *pos <= '9')))
+        return 0;
+
+    char *end = NULL;
+    long v = strtol(pos, &end, 10);
+    if (end == pos)
+        return 0;
+
+    *out = (int)v;
+    return 1;
+}
+
+/* Architecture of the host binary the shell was compiled for. */
+static const char *
+host_architecture(void)
+{
+#if defined(__x86_64__)
+    return "x86_64";
+#elif defined(__aarch64__)
+    return "aarch64";
+#else
+    return "unknown";
+#endif
+}
+
 /* Read entire file into a malloc'd buffer. Caller must free. */
 static char *
 read_file(const char *path)
@@ -96,38 +147,200 @@ read_file(const char *path)
     return buf;
 }
 
-/* Parse a game manifest and populate the shell game arrays at index */
-static void
-parse_manifest(struct playos_shell *s, int index, const char *manifest_path)
+/* Validate a game directory's manifest against the current host and the
+ * supported API version, then populate the shell game arrays at index.
+ * Returns 1 when the game is valid and was loaded, 0 when it was skipped. */
+static int
+validate_and_load_manifest(struct playos_shell *s, int index,
+                           const char *games_path, const char *dir_name)
 {
+    char manifest_path[640];
+    snprintf(manifest_path, sizeof(manifest_path),
+             "%s/%s/manifest.json", games_path, dir_name);
+
     char *json = read_file(manifest_path);
     if (!json) {
-        PLAYOS_LOG_W("shell", "cannot read manifest: %s", manifest_path);
-        return;
+        PLAYOS_LOG_W("shell", "library: skip %s (cannot read manifest)",
+                     dir_name);
+        return 0;
     }
 
-    char buf[256];
-    int len;
+    char id[256]         = {0};
+    char name[256]       = {0};
+    char version[256]    = {0};
+    char executable[256] = {0};
+    char architecture[64] = {0};
+    int  api_version     = 0;
 
-    /* Display name — fall back to game ID if missing */
-    len = json_get_string(json, "name", buf, sizeof(buf));
-    if (len > 0) {
-        strncpy(s->game_names[index], buf, sizeof(s->game_names[index]) - 1);
+    int ok = 1;
+    if (json_get_string(json, "id", id, sizeof(id)) <= 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing id)", dir_name);
+        ok = 0;
+    }
+    if (json_get_string(json, "name", name, sizeof(name)) <= 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing name)", dir_name);
+        ok = 0;
+    }
+    if (json_get_string(json, "version", version, sizeof(version)) <= 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing version)", dir_name);
+        ok = 0;
+    }
+    if (json_get_string(json, "executable", executable, sizeof(executable)) <= 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing executable)", dir_name);
+        ok = 0;
+    }
+    if (json_get_string(json, "architecture", architecture,
+                        sizeof(architecture)) <= 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing architecture)", dir_name);
+        ok = 0;
+    }
+    if (!json_get_int(json, "api_version", &api_version)) {
+        PLAYOS_LOG_W("shell", "library: skip %s (missing api_version)", dir_name);
+        ok = 0;
     }
 
-    /* Version */
-    len = json_get_string(json, "version", buf, sizeof(buf));
-    if (len > 0) {
-        strncpy(s->game_versions[index], buf, sizeof(s->game_versions[index]) - 1);
+    if (!ok) {
+        free(json);
+        return 0;
     }
 
-    /* Description */
-    len = json_get_string(json, "description", buf, sizeof(buf));
-    if (len > 0) {
-        strncpy(s->game_descriptions[index], buf, sizeof(s->game_descriptions[index]) - 1);
+    /* The manifest id must match the directory name. */
+    if (strcmp(id, dir_name) != 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (id mismatch: %s)",
+                     dir_name, id);
+        free(json);
+        return 0;
     }
+
+    /* api_version must be supported by this shell build. */
+    if (api_version < 1 || api_version > PLAYOS_API_VERSION) {
+        PLAYOS_LOG_W("shell", "library: skip %s (unsupported api_version %d)",
+                     dir_name, api_version);
+        free(json);
+        return 0;
+    }
+
+    /* Architecture must match the running host. */
+    if (strcmp(architecture, host_architecture()) != 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (architecture %s != %s)",
+                     dir_name, architecture, host_architecture());
+        free(json);
+        return 0;
+    }
+
+    /* The referenced executable must exist inside the game directory. */
+    char exe_path[640];
+    snprintf(exe_path, sizeof(exe_path), "%s/%s/%s",
+             games_path, dir_name, executable);
+    if (access(exe_path, F_OK) != 0) {
+        PLAYOS_LOG_W("shell", "library: skip %s (executable missing: %s)",
+                     dir_name, executable);
+        free(json);
+        return 0;
+    }
+
+    /* Valid — populate the shell arrays. */
+    strncpy(s->game_ids[index], id, sizeof(s->game_ids[0]) - 1);
+    s->game_ids[index][sizeof(s->game_ids[0]) - 1] = '\0';
+
+    strncpy(s->game_names[index], name, sizeof(s->game_names[0]) - 1);
+    s->game_names[index][sizeof(s->game_names[0]) - 1] = '\0';
+
+    strncpy(s->game_versions[index], version, sizeof(s->game_versions[0]) - 1);
+    s->game_versions[index][sizeof(s->game_versions[0]) - 1] = '\0';
+
+    char description[256] = {0};
+    json_get_string(json, "description", description, sizeof(description));
+    strncpy(s->game_descriptions[index], description,
+            sizeof(s->game_descriptions[0]) - 1);
+    s->game_descriptions[index][sizeof(s->game_descriptions[0]) - 1] = '\0';
+
+    char icon_path[640];
+    snprintf(icon_path, sizeof(icon_path), "%s/%s/assets/icon.png",
+             games_path, dir_name);
+    s->game_has_icon[index] = (access(icon_path, F_OK) == 0);
 
     free(json);
+    return 1;
+}
+
+/* Swap two game entries (all text fields and the icon flag). */
+static void
+swap_games(struct playos_shell *s, int a, int b)
+{
+    char buf128[128];
+    char buf64[64];
+    char buf256[256];
+
+    memcpy(buf128, s->game_ids[a], sizeof(buf128));
+    memcpy(s->game_ids[a], s->game_ids[b], sizeof(buf128));
+    memcpy(s->game_ids[b], buf128, sizeof(buf128));
+
+    memcpy(buf128, s->game_names[a], sizeof(buf128));
+    memcpy(s->game_names[a], s->game_names[b], sizeof(buf128));
+    memcpy(s->game_names[b], buf128, sizeof(buf128));
+
+    memcpy(buf64, s->game_versions[a], sizeof(buf64));
+    memcpy(s->game_versions[a], s->game_versions[b], sizeof(buf64));
+    memcpy(s->game_versions[b], buf64, sizeof(buf64));
+
+    memcpy(buf256, s->game_descriptions[a], sizeof(buf256));
+    memcpy(s->game_descriptions[a], s->game_descriptions[b], sizeof(buf256));
+    memcpy(s->game_descriptions[b], buf256, sizeof(buf256));
+
+    bool has_icon = s->game_has_icon[a];
+    s->game_has_icon[a] = s->game_has_icon[b];
+    s->game_has_icon[b] = has_icon;
+}
+
+/* Stable insertion sort by display name (case-sensitive). */
+static void
+sort_games(struct playos_shell *s)
+{
+    for (int i = 1; i < s->game_count; i++) {
+        for (int j = i; j > 0; j--) {
+            if (strcmp(s->game_names[j - 1], s->game_names[j]) > 0)
+                swap_games(s, j - 1, j);
+            else
+                break;
+        }
+    }
+}
+
+static void
+library_unload_icons(void)
+{
+    for (int i = 0; i < 64; i++) {
+        if (s_game_icons_loaded[i]) {
+            UnloadTexture(s_game_icons[i]);
+            s_game_icons_loaded[i] = false;
+        }
+    }
+}
+
+static void
+library_load_icons(struct playos_shell *s, const char *games_path)
+{
+    library_unload_icons();
+
+    for (int i = 0; i < s->game_count; i++) {
+        s_game_icons_loaded[i] = false;
+        if (!s->game_has_icon[i])
+            continue;
+
+        char icon_path[640];
+        snprintf(icon_path, sizeof(icon_path),
+                 "%s/%s/assets/icon.png", games_path, s->game_ids[i]);
+
+        Texture2D tex = LoadTexture(icon_path);
+        if (tex.id != 0) {
+            s_game_icons[i] = tex;
+            s_game_icons_loaded[i] = true;
+        } else {
+            PLAYOS_LOG_W("shell", "library: failed to load icon %s", icon_path);
+            s->game_has_icon[i] = false;
+        }
+    }
 }
 
 /* ── Grid layout constants ─────────────────────────────────────────────── */
@@ -148,9 +361,13 @@ screen_library_enter(struct playos_shell *s)
     s->selected_game_index = 0;
 
     /* Clear manifest data arrays */
+    memset(s->game_ids, 0, sizeof(s->game_ids));
     memset(s->game_names, 0, sizeof(s->game_names));
     memset(s->game_versions, 0, sizeof(s->game_versions));
     memset(s->game_descriptions, 0, sizeof(s->game_descriptions));
+    memset(s->game_has_icon, 0, sizeof(s->game_has_icon));
+
+    library_unload_icons();
 
     const char *games_path = playos_storage_get_games_path();
     if (!games_path) {
@@ -165,7 +382,7 @@ screen_library_enter(struct playos_shell *s)
     }
 
     struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && s->game_count < 64) {
+    while ((entry = readdir(dir)) != NULL) {
         /* Skip dotfiles */
         if (entry->d_name[0] == '.')
             continue;
@@ -179,26 +396,22 @@ screen_library_enter(struct playos_shell *s)
         if (stat(full_path, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
 
-        /* Store game ID */
-        int idx = s->game_count;
-        strncpy(s->game_ids[idx], entry->d_name,
-                sizeof(s->game_ids[0]) - 1);
-        s->game_ids[idx][sizeof(s->game_ids[0]) - 1] = '\0';
+        if (s->game_count >= 64) {
+            PLAYOS_LOG_W("shell", "library: game limit reached; ignoring %s",
+                         entry->d_name);
+            continue;
+        }
 
-        /* Default display name = game ID (fallback if no manifest) */
-        strncpy(s->game_names[idx], entry->d_name,
-                sizeof(s->game_names[0]) - 1);
-
-        /* Try to parse manifest.json */
-        char manifest_path[640];
-        snprintf(manifest_path, sizeof(manifest_path),
-                 "%s/manifest.json", full_path);
-        parse_manifest(s, idx, manifest_path);
-
-        s->game_count++;
+        /* Only a validated manifest advances the count. */
+        if (validate_and_load_manifest(s, s->game_count, games_path,
+                                       entry->d_name))
+            s->game_count++;
     }
 
     closedir(dir);
+
+    sort_games(s);
+    library_load_icons(s, games_path);
 
     PLAYOS_LOG_I("shell", "library: found %d games in %s",
                  s->game_count, games_path);
@@ -276,23 +489,30 @@ draw_game_card(struct playos_shell *s, int index,
     render_draw_rect(x, y, card_w, card_h,
                      0.12f, 0.20f, 0.35f, 1.0f);
 
-    /* Icon placeholder (top-center) */
+    /* Icon (top-center) */
     float icon_size = 80.0f;
     float icon_x = x + (card_w - icon_size) * 0.5f;
     float icon_y = y + 12.0f;
 
-    /* Darker placeholder rect */
-    render_draw_rect(icon_x, icon_y, icon_size, icon_size,
-                     0.15f, 0.25f, 0.40f, 1.0f);
+    if (s->game_has_icon[index] && s_game_icons_loaded[index]) {
+        Texture2D *tex = &s_game_icons[index];
+        Rectangle src = { 0.0f, 0.0f, (float)tex->width, (float)tex->height };
+        Rectangle dst = { icon_x, icon_y, icon_size, icon_size };
+        DrawTexturePro(*tex, src, dst, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
+    } else {
+        /* Darker placeholder rect */
+        render_draw_rect(icon_x, icon_y, icon_size, icon_size,
+                         0.15f, 0.25f, 0.40f, 1.0f);
 
-    /* "?" in placeholder */
-    float q_scale = 4.0f;
-    const char *q = "?";
-    float q_w = render_text_width(q, q_scale);
-    render_draw_text(q,
-                     icon_x + (icon_size - q_w) * 0.5f,
-                     icon_y + icon_size * 0.35f,
-                     q_scale, 0.5f, 0.5f, 0.5f, 1.0f);
+        /* "?" in placeholder */
+        float q_scale = 4.0f;
+        const char *q = "?";
+        float q_w = render_text_width(q, q_scale);
+        render_draw_text(q,
+                         icon_x + (icon_size - q_w) * 0.5f,
+                         icon_y + icon_size * 0.35f,
+                         q_scale, 0.5f, 0.5f, 0.5f, 1.0f);
+    }
 
     /* Game title (use display name from manifest, fallback to game ID) */
     const char *display_name = s->game_names[index];

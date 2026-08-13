@@ -55,6 +55,7 @@ struct playos_shell {
     char   game_names[64][128];       /* Display names from manifest.json */
     char   game_versions[64][64];     /* Versions from manifest.json */
     char   game_descriptions[64][256];/* Descriptions from manifest.json */
+    bool   game_has_icon[64];         /* assets/icon.png exists and loaded */
     int    selected_game_index;
 
     /* ── Lifecycle ── */
