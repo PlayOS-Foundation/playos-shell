@@ -5,7 +5,7 @@
 *   PLATFORM: PLATFORM_PLAYOS
 *       - Native Wayland client backend for the PlayOS shell
 *       - Owns: fullscreen xdg_toplevel, wl_egl_window, EGL/GLES2 context,
-*         wl_surface_frame pacing and eglSwapBuffers
+*         and eglSwapBuffers (no wl_surface_frame pacing — see SwapScreenBuffer)
 *
 *   NOTES:
 *       - Input is intentionally NOT handled here. The PlayOS shell keeps
@@ -67,9 +67,6 @@ typedef struct {
     EGLSurface egl_surface;
     EGLContext egl_context;
     EGLConfig  egl_config;
-
-    struct wl_callback *frame_callback;
-    bool                frame_pending;
 
     bool configured;
     int  pending_width;
@@ -177,20 +174,6 @@ xdg_toplevel_handle_close(void *data, struct xdg_toplevel *toplevel)
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
     .configure = xdg_toplevel_handle_configure,
     .close = xdg_toplevel_handle_close,
-};
-
-// Frame callback (Wayland vsync) listener.
-static void
-frame_callback_done(void *data, struct wl_callback *cb, uint32_t time)
-{
-    (void)data; (void)time;
-    wl_callback_destroy(cb);
-    platform.frame_callback = NULL;
-    platform.frame_pending = false;
-}
-
-static const struct wl_callback_listener frame_callback_listener = {
-    .done = frame_callback_done,
 };
 
 // Keep raylib's window/viewport state in sync with the real native size.
@@ -466,28 +449,12 @@ void DisableCursor(void)
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void)
 {
-    // Wayland vsync: wait for the previous frame to be presented (the
-    // callback is armed below, after eglSwapBuffers attaches a buffer),
-    // then present the newly drawn frame.
-    if (platform.wl_surface && platform.frame_pending) {
-        while (platform.frame_pending && (wl_display_dispatch(platform.wl_display) >= 0)) { }
-    }
-
+    // No wl_surface_frame pacing here: the compositor presents at its own
+    // vsync, and blocking on a frame callback can deadlock when frame-done
+    // delivery stalls (an unmapped or already-committed surface never fires
+    // the callback). eglSwapInterval(0) keeps eglSwapBuffers non-blocking;
+    // Wayland events are pumped non-blockingly in PollInputEvents().
     eglSwapBuffers(platform.egl_display, platform.egl_surface);
-
-    // Arm the frame callback for the frame just presented. Blocking on a
-    // callback for a bufferless commit (the old code committed before the
-    // first eglSwapBuffers) deadlocks: an unmapped surface is never
-    // presented, so its frame callback never fires.
-    if (platform.wl_surface) {
-        if (platform.frame_callback) {
-            wl_callback_destroy(platform.frame_callback);
-            platform.frame_callback = NULL;
-        }
-        platform.frame_callback = wl_surface_frame(platform.wl_surface);
-        wl_callback_add_listener(platform.frame_callback, &frame_callback_listener, NULL);
-        platform.frame_pending = true;
-    }
 }
 
 //----------------------------------------------------------------------------------
@@ -587,6 +554,14 @@ void PollInputEvents(void)
     {
         CORE.Input.Keyboard.previousKeyState[i] = CORE.Input.Keyboard.currentKeyState[i];
         CORE.Input.Keyboard.keyRepeatInFrame[i] = 0;
+    }
+
+    // Pump Wayland events non-blockingly so xdg configure, wl_callback and
+    // playos_manager events are processed every frame without stalling.
+    if (platform.wl_display)
+    {
+        wl_display_dispatch_pending(platform.wl_display);
+        wl_display_flush(platform.wl_display);
     }
 }
 
@@ -705,7 +680,8 @@ int InitPlatform(void)
         return -1;
     }
 
-    // Never throttle here — frame pacing is handled by wl_surface_frame
+    // Never throttle inside eglSwapBuffers — the compositor presents at its
+    // own vsync and the shell renders unthrottled (matching the test-client).
     eglSwapInterval(platform.egl_display, 0);
 
     // Create the native window + EGL surface
@@ -766,12 +742,6 @@ int InitPlatform(void)
 // Close platform
 void ClosePlatform(void)
 {
-    if (platform.frame_callback)
-    {
-        wl_callback_destroy(platform.frame_callback);
-        platform.frame_callback = NULL;
-    }
-
     if (platform.egl_display != EGL_NO_DISPLAY)
     {
         eglMakeCurrent(platform.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
