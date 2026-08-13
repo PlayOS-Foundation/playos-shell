@@ -180,14 +180,31 @@ int shell_input_init(struct playos_shell *s)
 
     memset(&s->controller, 0, sizeof(s->controller));
     memset(&s->controller_prev, 0, sizeof(s->controller_prev));
+    s->buttons_pressed = 0;
 
     return 0;
+}
+
+/* Update a button bit and record a press edge.
+ * ev.value semantics: 0 = release, 1 = press, 2 = auto-repeat.
+ * Only a genuine press (value == 1) is an edge; auto-repeat is not. */
+static void
+input_apply_button(struct playos_shell *s, playos_button_mask_t mask, int value)
+{
+    if (value) {
+        if (value == 1)
+            s->buttons_pressed |= mask;
+        s->controller.buttons |= mask;
+    } else {
+        s->controller.buttons &= ~mask;
+    }
 }
 
 void shell_input_poll(struct playos_shell *s)
 {
     /* Save previous state for edge detection */
     s->controller_prev = s->controller;
+    s->buttons_pressed = 0;
 
     /* Auto-retry device discovery if fd is not open.
      * The controller device may appear later (driver load, hotplug). */
@@ -221,74 +238,59 @@ void shell_input_poll(struct playos_shell *s)
             switch (ev.code) {
             /* ── Face buttons ── */
             case BTN_SOUTH:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SOUTH;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_SOUTH;
+                input_apply_button(s, PLAYOS_BUTTON_SOUTH, ev.value);
                 break;
             case BTN_EAST:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_EAST;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_EAST;
+                input_apply_button(s, PLAYOS_BUTTON_EAST, ev.value);
                 break;
             case BTN_WEST:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_WEST;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_WEST;
+                input_apply_button(s, PLAYOS_BUTTON_WEST, ev.value);
                 break;
             case BTN_NORTH:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_NORTH;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_NORTH;
+                input_apply_button(s, PLAYOS_BUTTON_NORTH, ev.value);
                 break;
 
             /* ── Start / Select ── */
             case BTN_START:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_START;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_START;
+                input_apply_button(s, PLAYOS_BUTTON_START, ev.value);
                 break;
             case BTN_SELECT:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SELECT;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_SELECT;
+                input_apply_button(s, PLAYOS_BUTTON_SELECT, ev.value);
                 break;
 
             /* ── Shoulder buttons / triggers ── */
             case BTN_TL:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_L1;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_L1;
+                input_apply_button(s, PLAYOS_BUTTON_L1, ev.value);
                 break;
             case BTN_TR:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_R1;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_R1;
+                input_apply_button(s, PLAYOS_BUTTON_R1, ev.value);
                 break;
 
             /* ── Stick clicks ── */
             case BTN_THUMBL:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_L3;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_L3;
+                input_apply_button(s, PLAYOS_BUTTON_L3, ev.value);
                 break;
             case BTN_THUMBR:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_R3;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_R3;
+                input_apply_button(s, PLAYOS_BUTTON_R3, ev.value);
                 break;
 
             /* ── D-pad as buttons (hid-asus and some drivers) ── */
             case BTN_DPAD_UP:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_UP;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_UP;
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_UP, ev.value);
                 break;
             case BTN_DPAD_DOWN:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_DOWN;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_DOWN;
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_DOWN, ev.value);
                 break;
             case BTN_DPAD_LEFT:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_LEFT;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_LEFT;
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_LEFT, ev.value);
                 break;
             case BTN_DPAD_RIGHT:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_DPAD_RIGHT;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_DPAD_RIGHT;
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_RIGHT, ev.value);
                 break;
 
             /* ── Reserved: SYSTEM (Xbox Guide) ── */
             case BTN_MODE:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_SYSTEM;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_SYSTEM;
+                input_apply_button(s, PLAYOS_BUTTON_SYSTEM, ev.value);
                 break;
 
             /* ── Reserved: QUICK_MENU (Ally Armoury Crate / CC) ── */
@@ -297,8 +299,7 @@ void shell_input_poll(struct playos_shell *s)
             case KEY_LEFTMETA:
             case KEY_RIGHTMETA:
             case BTN_TRIGGER_HAPPY1:
-                if (ev.value) s->controller.buttons |= PLAYOS_BUTTON_QUICK_MENU;
-                else          s->controller.buttons &= ~PLAYOS_BUTTON_QUICK_MENU;
+                input_apply_button(s, PLAYOS_BUTTON_QUICK_MENU, ev.value);
                 break;
             }
             break;
@@ -336,6 +337,11 @@ int shell_input_button_pressed(const struct playos_shell *s,
 {
     int pressed = ((s->controller_prev.buttons & button) == 0) &&
                   ((s->controller.buttons & button) != 0);
+
+    /* Also honor event-level edges: a press+release within one poll
+     * (fast tap) never survives as a net state diff, so catch it here. */
+    if (!pressed && (s->buttons_pressed & button))
+        pressed = 1;
 
     /* Log button presses at most once per second to confirm input decoding.
      * This lets us trace whether the shell is reading the controller

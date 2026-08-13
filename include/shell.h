@@ -38,6 +38,10 @@ struct playos_shell {
     int  evdev_fd;
     PlayOSControllerState controller;
     PlayOSControllerState controller_prev;  /* For edge detection */
+    playos_button_mask_t   buttons_pressed; /* Event-level press edges this poll.
+                                               Catches press+release within one
+                                               frame (fast taps) that the net
+                                               state diff would otherwise drop. */
 
     /* ── Output ── */
     int    output_width;
