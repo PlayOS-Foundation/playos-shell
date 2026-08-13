@@ -117,7 +117,7 @@ screen_home_draw(struct playos_shell *s)
     char footer[256];
     const char *device = playos_system_device_model();
     const char *os_ver = playos_system_os_version();
-    snprintf(footer, sizeof(footer), "%s  |  PlayOS %s  |  Sprint 5",
+    snprintf(footer, sizeof(footer), "%s  |  PlayOS %s  |  Sprint 6",
              device ? device : "Unknown Device",
              os_ver ? os_ver : "0.3.0");
 
