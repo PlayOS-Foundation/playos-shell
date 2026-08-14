@@ -113,6 +113,12 @@ target_sources(raylib PRIVATE
     ${GEN_DIR}/xdg-shell-protocol.c)
 add_dependencies(raylib playos-protocols)
 
+# rcore_playos.c translates the PlayOS controller snapshot (from the platform
+# input API) into raylib's gamepad subsystem, so it needs the playos headers
+# and links libplayos (shared libraylib resolves playos_input_get_controller_state).
+target_include_directories(raylib PRIVATE ${PLAYOS_INCLUDE_DIR})
+target_link_libraries(raylib PRIVATE ${PLAYOS_LIB})
+
 set(RAYLIB_LIB raylib)
 
 # ── Shell source files ─────────────────────────────────────────────────

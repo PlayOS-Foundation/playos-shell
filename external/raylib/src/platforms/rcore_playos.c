@@ -8,10 +8,15 @@
 *         and eglSwapBuffers (no wl_surface_frame pacing — see SwapScreenBuffer)
 *
 *   NOTES:
-*       - Input is intentionally NOT handled here. The PlayOS shell keeps
-*         direct evdev input ownership (src/input.c) so SYSTEM/QUICK_MENU
+*       - Keyboard/mouse input is intentionally NOT handled here. The PlayOS
+*         shell keeps direct evdev ownership (src/input.c) so SYSTEM/QUICK_MENU
 *         reserved buttons survive. PollInputEvents() only resets raylib's
-*         internal input state so it never interferes.
+*         keyboard state so it never interferes.
+*       - Gamepad input IS handled here: PollInputEvents() pulls the
+*         controller snapshot from the PlayOS platform input API
+*         (playos_input_get_controller_state), which owns evdev discovery and
+*         decoding and already strips reserved buttons, then translates it
+*         into raylib's CORE.Input.Gamepad.* subsystem.
 *       - playos_manager_v1 is bound during registry discovery and exposed
 *         through platform_get_playos_manager() so main.c can perform the
 *         trusted shell registration exactly as before.
@@ -48,6 +53,8 @@
 
 #include "xdg-shell-client-protocol.h"
 #include "playos-v1-client-protocol.h"
+
+#include "playos/playos_input.h"   // PlayOS logical controller state
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -530,9 +537,98 @@ const char *GetKeyName(int key)
     return "";
 }
 
+// Translate the PlayOS controller snapshot into raylib's gamepad subsystem.
+//
+// The PlayOS platform input API is the single source of truth for controller
+// state: it owns evdev discovery/decoding and already strips the reserved
+// SYSTEM/QUICK_MENU buttons, so this backend never exposes them to games.
+static void PlayOSPollGamepad(void)
+{
+    const int gamepad = 0;   // PlayOS exposes a single logical controller
+    PlayOSControllerState state;
+
+    // Register previous gamepad button states before overwriting current ones.
+    for (int k = 0; k < MAX_GAMEPAD_BUTTONS; k++)
+    {
+        CORE.Input.Gamepad.previousButtonState[gamepad][k] = CORE.Input.Gamepad.currentButtonState[gamepad][k];
+    }
+
+    if (playos_input_get_controller_state(&state) != 0)
+    {
+        // No controller connected: clear current buttons and mark not ready.
+        memset(CORE.Input.Gamepad.currentButtonState[gamepad], 0, sizeof(CORE.Input.Gamepad.currentButtonState[gamepad]));
+        CORE.Input.Gamepad.ready[gamepad] = false;
+        CORE.Input.Gamepad.axisCount[gamepad] = 0;
+        return;
+    }
+
+    CORE.Input.Gamepad.ready[gamepad] = true;
+    strncpy(CORE.Input.Gamepad.name[gamepad], "PlayOS Controller", MAX_GAMEPAD_NAME_LENGTH - 1);
+    CORE.Input.Gamepad.name[gamepad][MAX_GAMEPAD_NAME_LENGTH - 1] = '\0';
+
+    // ── Buttons: PlayOS bitmask → raylib button indices ──────────────
+    memset(CORE.Input.Gamepad.currentButtonState[gamepad], 0, sizeof(CORE.Input.Gamepad.currentButtonState[gamepad]));
+
+    static const struct { playos_button_mask_t mask; int button; } buttonMap[] = {
+        { PLAYOS_BUTTON_SOUTH,      GAMEPAD_BUTTON_RIGHT_FACE_DOWN  },  // A
+        { PLAYOS_BUTTON_EAST,       GAMEPAD_BUTTON_RIGHT_FACE_RIGHT },  // B
+        { PLAYOS_BUTTON_WEST,       GAMEPAD_BUTTON_RIGHT_FACE_LEFT  },  // X
+        { PLAYOS_BUTTON_NORTH,      GAMEPAD_BUTTON_RIGHT_FACE_UP    },  // Y
+        { PLAYOS_BUTTON_START,      GAMEPAD_BUTTON_MIDDLE_RIGHT     },
+        { PLAYOS_BUTTON_SELECT,     GAMEPAD_BUTTON_MIDDLE_LEFT      },
+        { PLAYOS_BUTTON_DPAD_UP,    GAMEPAD_BUTTON_LEFT_FACE_UP     },
+        { PLAYOS_BUTTON_DPAD_DOWN,  GAMEPAD_BUTTON_LEFT_FACE_DOWN   },
+        { PLAYOS_BUTTON_DPAD_LEFT,  GAMEPAD_BUTTON_LEFT_FACE_LEFT   },
+        { PLAYOS_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_LEFT_FACE_RIGHT  },
+        { PLAYOS_BUTTON_L1,         GAMEPAD_BUTTON_LEFT_TRIGGER_1   },
+        { PLAYOS_BUTTON_R1,         GAMEPAD_BUTTON_RIGHT_TRIGGER_1  },
+        { PLAYOS_BUTTON_L3,         GAMEPAD_BUTTON_LEFT_THUMB       },
+        { PLAYOS_BUTTON_R3,         GAMEPAD_BUTTON_RIGHT_THUMB      },
+        // PLAYOS_BUTTON_SYSTEM (Guide) and PLAYOS_BUTTON_QUICK_MENU are
+        // reserved — intentionally omitted from the gamepad mapping.
+    };
+
+    for (size_t i = 0; i < sizeof(buttonMap)/sizeof(buttonMap[0]); i++)
+    {
+        if (state.buttons & buttonMap[i].mask)
+            CORE.Input.Gamepad.currentButtonState[gamepad][buttonMap[i].button] = 1;
+    }
+
+    // ── Axes: sticks map 1:1, triggers [0,1] → [-1,1] ───────────────
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_LEFT_X]  = state.axes[PLAYOS_AXIS_LEFT_X];
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_LEFT_Y]  = state.axes[PLAYOS_AXIS_LEFT_Y];
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_RIGHT_X] = state.axes[PLAYOS_AXIS_RIGHT_X];
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_RIGHT_Y] = state.axes[PLAYOS_AXIS_RIGHT_Y];
+
+    // Raylib triggers rest at -1 and reach +1 when fully pressed (GLFW
+    // convention); PlayOS reports trigger pressure in [0,1].
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_LEFT_TRIGGER]  = state.axes[PLAYOS_AXIS_LEFT_TRIGGER]*2.0f - 1.0f;
+    CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_RIGHT_TRIGGER] = state.axes[PLAYOS_AXIS_RIGHT_TRIGGER]*2.0f - 1.0f;
+
+    // Synthesize second-trigger buttons (L2/R2) from trigger pressure so they
+    // are queryable as buttons too, matching the desktop (GLFW) backend.
+    if (CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_LEFT_TRIGGER] > 0.1f)
+        CORE.Input.Gamepad.currentButtonState[gamepad][GAMEPAD_BUTTON_LEFT_TRIGGER_2] = 1;
+    if (CORE.Input.Gamepad.axisState[gamepad][GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.1f)
+        CORE.Input.Gamepad.currentButtonState[gamepad][GAMEPAD_BUTTON_RIGHT_TRIGGER_2] = 1;
+
+    CORE.Input.Gamepad.axisCount[gamepad] = GAMEPAD_AXIS_RIGHT_TRIGGER + 1; // 6 axes
+
+    // Track the most recently pressed button for GetGamepadButtonPressed()
+    // (used by input-remapping UIs). Set on press; persists across frames.
+    for (int b = 0; b < MAX_GAMEPAD_BUTTONS; b++)
+    {
+        if (CORE.Input.Gamepad.currentButtonState[gamepad][b] &&
+            !CORE.Input.Gamepad.previousButtonState[gamepad][b])
+        {
+            CORE.Input.Gamepad.lastButtonPressed = b;
+        }
+    }
+}
+
 // Register all input events
-// NOTE: PlayOS shell input is owned by src/input.c (direct evdev). This only
-//       resets raylib's internal input state so it never conflicts.
+// NOTE: PlayOS keyboard/mouse input is owned by src/input.c (direct evdev);
+//       gamepad input is translated from the platform input API above.
 void PollInputEvents(void)
 {
 #if SUPPORT_GESTURES_SYSTEM
@@ -548,8 +644,8 @@ void PollInputEvents(void)
     // Reset key repeats
     for (int i = 0; i < MAX_KEYBOARD_KEYS; i++) CORE.Input.Keyboard.keyRepeatInFrame[i] = 0;
 
-    // Reset last gamepad button/axis registered state
-    CORE.Input.Gamepad.lastButtonPressed = 0; // GAMEPAD_BUTTON_UNKNOWN
+    // Refresh raylib's gamepad state from the PlayOS controller snapshot.
+    PlayOSPollGamepad();
 
     // Register previous touch states
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
