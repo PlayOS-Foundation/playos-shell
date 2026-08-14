@@ -160,6 +160,7 @@ typedef struct tagBITMAPINFOHEADER {
 #define MA_FREE RL_FREE
 
 #define MA_NO_JACK
+#define MA_NO_PULSEAUDIO
 #define MA_NO_WAV
 #define MA_NO_FLAC
 #define MA_NO_MP3

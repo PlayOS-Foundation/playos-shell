@@ -49,7 +49,7 @@
     #define SUPPORT_MODULE_RMODELS      0       // PlayOS: 3D model rendering unused by shell
 #endif
 #ifndef SUPPORT_MODULE_RAUDIO
-    #define SUPPORT_MODULE_RAUDIO       0       // PlayOS: audio is not used by shell
+    #define SUPPORT_MODULE_RAUDIO       1       // PlayOS: ALSA audio via miniaudio (Sprint 8)
 #endif
 
 //------------------------------------------------------------------------------------

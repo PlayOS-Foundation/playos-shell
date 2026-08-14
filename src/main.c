@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <math.h>
+#include <stdint.h>
 
 #include "raylib.h"
 #include "shell.h"
@@ -34,6 +36,88 @@
 
 /* ── Global (for signal handler) ─────────────────────────────────────── */
 static struct playos_shell *g_shell = NULL;
+
+/* ── UI sounds (Sprint 8) ───────────────────────────────────────────────
+ * Procedurally generated short tones; unavailable (and gracefully skipped)
+ * when no audio device exists, e.g. under QEMU/CI. */
+static Sound g_nav_sound     = { 0 };
+static Sound g_confirm_sound = { 0 };
+static bool  g_audio_ready   = false;
+
+#define SHELL_TAU 6.283185307179586f
+
+static Sound
+shell_make_tone(float freq, float seconds)
+{
+    const int sample_rate = 44100;
+    const int frames = (int)(sample_rate * seconds);
+
+    Wave wave = { 0 };
+    wave.frameCount = (unsigned int)frames;
+    wave.sampleRate = (unsigned int)sample_rate;
+    wave.sampleSize = 16;
+    wave.channels = 1;
+    wave.data = MemAlloc((size_t)frames * sizeof(int16_t));
+    if (!wave.data)
+        return (Sound){ 0 };
+
+    int16_t *samples = (int16_t *)wave.data;
+    for (int i = 0; i < frames; i++) {
+        const float t = (float)i / (float)sample_rate;
+        samples[i] = (int16_t)(11000.0f * sinf(SHELL_TAU * freq * t));
+    }
+
+    Sound sound = LoadSoundFromWave(wave);
+    UnloadWave(wave);
+    return sound;
+}
+
+static void
+shell_play_nav(void)
+{
+    if (g_audio_ready && IsSoundValid(g_nav_sound))
+        PlaySound(g_nav_sound);
+}
+
+static void
+shell_play_confirm(void)
+{
+    if (g_audio_ready && IsSoundValid(g_confirm_sound))
+        PlaySound(g_confirm_sound);
+}
+
+static void
+shell_audio_init(void)
+{
+    InitAudioDevice();
+    g_audio_ready = IsAudioDeviceReady();
+    if (!g_audio_ready) {
+        PLAYOS_LOG_W("shell", "audio device unavailable — UI sounds disabled");
+        return;
+    }
+
+    g_nav_sound = shell_make_tone(660.0f, 0.07f);
+    g_confirm_sound = shell_make_tone(880.0f, 0.12f);
+
+    if (IsSoundValid(g_confirm_sound))
+        PlaySound(g_confirm_sound);   /* startup chime */
+
+    PLAYOS_LOG_I("shell", "audio device ready — UI sounds enabled");
+}
+
+static void
+shell_audio_shutdown(void)
+{
+    if (!g_audio_ready)
+        return;
+
+    if (IsSoundValid(g_nav_sound))
+        UnloadSound(g_nav_sound);
+    if (IsSoundValid(g_confirm_sound))
+        UnloadSound(g_confirm_sound);
+
+    CloseAudioDevice();
+}
 
 /* ── Signal handler ──────────────────────────────────────────────────── */
 
@@ -118,6 +202,9 @@ main(int argc, char *argv[])
     PLAYOS_LOG_I("shell", "window ready: %dx%d",
                  s->output_width, s->output_height);
 
+    /* ── UI sounds (Sprint 8) ── */
+    shell_audio_init();
+
     /* ── Register as trusted shell ── */
     struct playos_manager_v1 *mgr = platform_get_playos_manager();
     if (mgr) {
@@ -173,6 +260,20 @@ main(int argc, char *argv[])
 
         /* Input — direct evdev, all buttons decoded in shell_input_poll() */
         shell_input_poll(s);
+
+        /* UI sounds: confirm on A, navigation on d-pad / shoulders / back. */
+        if (!s->is_suspended) {
+            if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH))
+                shell_play_confirm();
+            else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_L1) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_R1) ||
+                     shell_input_button_pressed(s, PLAYOS_BUTTON_EAST))
+                shell_play_nav();
+        }
 
         /* Lifecycle events from playos-init */
         {
@@ -260,6 +361,8 @@ main(int argc, char *argv[])
 
     /* ── Cleanup ── */
     PLAYOS_LOG_I("shell", "shutting down");
+
+    shell_audio_shutdown();
 
     /* Closes the raylib window: destroys EGL surface/context, the
      * wl_egl_window, xdg surfaces, and disconnects from Wayland. */
