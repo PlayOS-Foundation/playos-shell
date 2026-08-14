@@ -67,6 +67,9 @@ struct playos_shell {
 
     /* ── Settings cursor ── */
     int    settings_tab;          /* 0=display, 1=audio, 2=power, 3=system */
+    /* ── Power actions (System tab) ── */
+    int    settings_power_cursor; /* 0 = Power Off, 1 = Restart */
+    bool   power_confirm;         /* confirmation dialog active */
     /* ── (ipc_fd removed — per-call connect/launch/disconnect pattern) ── */
 };
 

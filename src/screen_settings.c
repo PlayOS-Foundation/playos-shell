@@ -9,9 +9,14 @@
 
 #include "shell.h"
 #include "playos/playos_system.h"
+#include "playos/playos_logging.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#ifdef PLAYOS_TRUSTED_IPC
+#include "playos-runtime/trusted_control.h"
+#endif
 
 /* ── Tab definitions ───────────────────────────────────────────────────── */
 
@@ -29,6 +34,8 @@ void
 screen_settings_enter(struct playos_shell *s)
 {
     s->settings_tab = 0;
+    s->settings_power_cursor = 0;
+    s->power_confirm = false;
 }
 
 /* ── Update ────────────────────────────────────────────────────────────── */
@@ -36,6 +43,32 @@ screen_settings_enter(struct playos_shell *s)
 void
 screen_settings_update(struct playos_shell *s)
 {
+    /* ── Power confirmation modal ─────────────────────────────────────── */
+    if (s->power_confirm) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            /* A: confirm the selected power action. */
+#ifdef PLAYOS_TRUSTED_IPC
+            if (s->settings_power_cursor == 1) {
+                PLAYOS_LOG_I("shell", "settings: reboot confirmed");
+                playos_trusted_reboot(-1);
+            } else {
+                PLAYOS_LOG_I("shell", "settings: power-off confirmed");
+                /* Orderly power-off never returns; this blocks until the
+                 * kernel powers the machine down. */
+                playos_trusted_shutdown(-1);
+            }
+#else
+            PLAYOS_LOG_W("shell", "settings: power action requested "
+                         "(trusted IPC not available)");
+            s->power_confirm = false;
+#endif
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+            /* B: cancel. */
+            s->power_confirm = false;
+        }
+        return;
+    }
+
     /* D-pad L/R: switch tab */
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
         if (s->settings_tab > 0)
@@ -48,6 +81,22 @@ screen_settings_update(struct playos_shell *s)
             s->settings_tab++;
         else
             s->settings_tab = 0;
+    }
+
+    /* System tab: selectable power actions */
+    if (s->settings_tab == 3) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+            if (s->settings_power_cursor > 0)
+                s->settings_power_cursor--;
+        }
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
+            if (s->settings_power_cursor < 1)
+                s->settings_power_cursor++;
+        }
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            s->power_confirm = true;
+            return;
+        }
     }
 
     /* B: back to home */
@@ -216,15 +265,59 @@ screen_settings_draw(struct playos_shell *s)
             const char *locale = playos_system_locale();
             draw_info_line(s, "Locale", locale,
                            content_x, &content_y, label_scale, value_scale);
+
+            /* ── Power actions ── */
+            content_y += label_scale * 8.0f;
+            static const char *power_labels[2] = { "Power Off", "Restart" };
+            float row_w = (float)w - content_x * 2.0f;
+            for (int i = 0; i < 2; i++) {
+                bool sel = (i == s->settings_power_cursor);
+                if (sel) {
+                    render_draw_rect(content_x,
+                                     content_y - label_scale * 0.5f,
+                                     row_w, label_scale * 7.0f,
+                                     0.84f, 0.42f, 0.0f, 0.9f);
+                }
+                render_draw_text(power_labels[i], content_x, content_y,
+                                 label_scale,
+                                 sel ? 1.0f : 0.6f,
+                                 sel ? 1.0f : 0.6f,
+                                 sel ? 1.0f : 0.6f,
+                                 1.0f);
+                content_y += label_scale * 8.0f;
+            }
         }
         break;
     }
 
     /* ── Navigation hint ── */
     float hint_scale = header_scale * 0.25f;
-    const char *hints = "[D-Pad] Switch Tab    [B] Back";
+    const char *hints = (s->settings_tab == 3)
+                            ? "[D-Pad] Navigate    [A] Select    [B] Back"
+                            : "[D-Pad] Switch Tab    [B] Back";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
                      (float)h - hint_scale * 20.0f,
                      hint_scale, 0.5f, 0.5f, 0.6f, 1.0f);
+
+    /* ── Power confirmation modal ── */
+    if (s->power_confirm) {
+        render_draw_rect(0.0f, 0.0f, (float)w, (float)h,
+                         0.0f, 0.0f, 0.0f, 0.7f);
+
+        float modal_scale = header_scale * 0.5f;
+        const char *action = (s->settings_power_cursor == 1)
+                                 ? "Restart PlayOS?"
+                                 : "Power off PlayOS?";
+        float action_w = render_text_width(action, modal_scale);
+        render_draw_text(action, ((float)w - action_w) * 0.5f,
+                         (float)h * 0.40f, modal_scale,
+                         1.0f, 1.0f, 1.0f, 1.0f);
+
+        const char *confirm_hint = "A: Confirm    B: Cancel";
+        float confirm_w = render_text_width(confirm_hint, modal_scale * 0.6f);
+        render_draw_text(confirm_hint, ((float)w - confirm_w) * 0.5f,
+                         (float)h * 0.52f, modal_scale * 0.6f,
+                         0.8f, 0.8f, 0.9f, 1.0f);
+    }
 }
