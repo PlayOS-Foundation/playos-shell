@@ -69,10 +69,12 @@ struct playos_shell {
     bool   is_suspended;
 
     /* ── Settings cursor ── */
-    int    settings_tab;          /* 0=display, 1=audio, 2=power, 3=system */
+    int    settings_tab;            /* active tab (see TAB_* enum in screen_settings.c) */
+    float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */
+    float  settings_content_scroll; /* vertical content scroll offset (px) */
     /* ── Power actions (System tab) ── */
-    int    settings_power_cursor; /* 0 = Power Off, 1 = Restart */
-    bool   power_confirm;         /* confirmation dialog active */
+    int    settings_power_cursor;   /* 0 = Power Off, 1 = Restart */
+    bool   power_confirm;           /* confirmation dialog active */
     /* ── (ipc_fd removed — per-call connect/launch/disconnect pattern) ── */
 };
 
@@ -118,6 +120,8 @@ void render_draw_rect(float x, float y, float w, float h,
 void render_draw_triangle(float x1, float y1, float x2, float y2,
                           float x3, float y3,
                           float r, float g, float b, float a);
+void render_begin_scissor(int x, int y, int w, int h);
+void render_end_scissor(void);
 void render_draw_text(const char *text, float x, float y,
                       float scale, float r, float g, float b, float a);
 void render_begin_frame(float r, float g, float b, float a);

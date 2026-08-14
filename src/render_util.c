@@ -59,6 +59,18 @@ render_draw_triangle(float x1, float y1, float x2, float y2,
 }
 
 void
+render_begin_scissor(int x, int y, int w, int h)
+{
+    BeginScissorMode(x, y, w, h);
+}
+
+void
+render_end_scissor(void)
+{
+    EndScissorMode();
+}
+
+void
 render_draw_text(const char *text, float x, float y,
                  float scale, float r, float g, float b, float a)
 {

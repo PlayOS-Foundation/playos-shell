@@ -1,8 +1,12 @@
 /**
  * screen_settings.c — Settings screen for PlayOS Shell
  *
- * Tabbed settings: Display, Audio, Power, System.
+ * Tabbed settings: Display, Audio, Power, System, Network, Input.
  * Displays system info from the Platform API.
+ *
+ * The tab strip is horizontally scrollable (the active tab is always kept
+ * in view) and the content region is vertically scrollable so tabs can grow
+ * extra info/input lines without overflowing the screen.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -20,20 +24,124 @@
 
 /* ── Tab definitions ───────────────────────────────────────────────────── */
 
-static const char *tab_names[] = {
+enum {
+    TAB_DISPLAY = 0,
+    TAB_AUDIO,
+    TAB_POWER,
+    TAB_SYSTEM,
+    TAB_NETWORK,
+    TAB_INPUT,
+    TAB_COUNT
+};
+
+static const char *tab_names[TAB_COUNT] = {
     "Display",
     "Audio",
     "Power",
     "System",
+    "Network",
+    "Input",
 };
-#define TAB_COUNT (int)(sizeof(tab_names) / sizeof(tab_names[0]))
+
+static float
+clampf(float v, float lo, float hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+/* ── Content-region metrics (shared by update + draw) ─────────────────── */
+
+static float
+settings_header_scale(const struct playos_shell *s)
+{
+    return (float)s->output_height / 50.0f;
+}
+
+static float
+settings_label_scale(const struct playos_shell *s)
+{
+    return settings_header_scale(s) * 0.35f;
+}
+
+/* Vertical advance of a single info line (label/value pair). */
+static float
+settings_line_step(const struct playos_shell *s)
+{
+    return settings_label_scale(s) * 16.0f;
+}
+
+/* Vertical advance of a selectable action row (e.g. Power Off / Restart). */
+static float
+settings_row_step(const struct playos_shell *s)
+{
+    return settings_label_scale(s) * 8.0f;
+}
+
+static float
+settings_content_top(const struct playos_shell *s)
+{
+    return settings_header_scale(s) * 30.0f;
+}
+
+static float
+settings_content_bottom(const struct playos_shell *s)
+{
+    /* Leave room for the navigation hint near the bottom edge. */
+    return (float)s->output_height - settings_header_scale(s) * 8.0f;
+}
+
+static float
+settings_viewport_height(const struct playos_shell *s)
+{
+    float h = settings_content_bottom(s) - settings_content_top(s);
+    return h > 0.0f ? h : 0.0f;
+}
+
+/* Total pixel height of a tab's content, used to clamp vertical scroll. */
+static float
+settings_content_height(const struct playos_shell *s, int tab)
+{
+    float info_h = settings_line_step(s);
+    float row_h  = settings_row_step(s);
+
+    switch (tab) {
+    case TAB_DISPLAY:
+    case TAB_AUDIO:
+    case TAB_POWER:
+        return 3.0f * info_h;
+    case TAB_SYSTEM:
+        /* 4 info lines + gap + 2 selectable power rows. */
+        return 4.0f * info_h + row_h + 2.0f * row_h;
+    case TAB_NETWORK:
+    case TAB_INPUT:
+        return 4.0f * info_h;
+    default:
+        return 0.0f;
+    }
+}
+
+/* Clamp the content scroll offset to [0, max] for the active tab. */
+static void
+settings_clamp_content_scroll(struct playos_shell *s)
+{
+    float max_scroll = settings_content_height(s, s->settings_tab)
+                     - settings_viewport_height(s);
+    if (max_scroll < 0.0f)
+        max_scroll = 0.0f;
+    s->settings_content_scroll =
+        clampf(s->settings_content_scroll, 0.0f, max_scroll);
+}
 
 /* ── Enter ─────────────────────────────────────────────────────────────── */
 
 void
 screen_settings_enter(struct playos_shell *s)
 {
-    s->settings_tab = 0;
+    s->settings_tab = TAB_DISPLAY;
+    s->settings_tab_scroll = 0.0f;
+    s->settings_content_scroll = 0.0f;
     s->settings_power_cursor = 0;
     s->power_confirm = false;
 }
@@ -69,7 +177,9 @@ screen_settings_update(struct playos_shell *s)
         return;
     }
 
-    /* D-pad L/R: switch tab */
+    int prev_tab = s->settings_tab;
+
+    /* D-pad L/R: switch tab (wraps around the strip). */
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
         if (s->settings_tab > 0)
             s->settings_tab--;
@@ -83,8 +193,13 @@ screen_settings_update(struct playos_shell *s)
             s->settings_tab = 0;
     }
 
-    /* System tab: selectable power actions */
-    if (s->settings_tab == 3) {
+    /* Reset vertical scroll whenever the tab changes. */
+    if (s->settings_tab != prev_tab)
+        s->settings_content_scroll = 0.0f;
+
+    /* D-pad U/D: vertical navigation / scrolling. */
+    if (s->settings_tab == TAB_SYSTEM) {
+        /* System tab: move between the two power actions. */
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
             if (s->settings_power_cursor > 0)
                 s->settings_power_cursor--;
@@ -97,6 +212,14 @@ screen_settings_update(struct playos_shell *s)
             s->power_confirm = true;
             return;
         }
+    } else {
+        /* Read-only tabs: scroll the info block so it can grow later. */
+        float step = settings_line_step(s);
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP))
+            s->settings_content_scroll -= step;
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN))
+            s->settings_content_scroll += step;
+        settings_clamp_content_scroll(s);
     }
 
     /* B: back to home */
@@ -115,7 +238,7 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
     int w = s->output_width;
     float tab_padding = scale * 4.0f;
 
-    /* Calculate total tab bar width */
+    /* Total width of all tabs. */
     float total_w = 0.0f;
     float tab_widths[TAB_COUNT];
     for (int i = 0; i < TAB_COUNT; i++) {
@@ -123,24 +246,61 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
         total_w += tab_widths[i];
     }
 
-    float cursor_x = ((float)w - total_w) * 0.5f;
+    /* Left/right margin so the strip can breathe when it overflows. */
+    float margin = scale * 6.0f;
+    float view_w = (float)w - margin * 2.0f;
+
+    float draw_x;
+    bool clipped = false;
+
+    if (total_w <= view_w) {
+        /* Everything fits: center the strip, no scroll. */
+        s->settings_tab_scroll = 0.0f;
+        draw_x = ((float)w - total_w) * 0.5f;
+    } else {
+        /* Overflow: keep the active tab centered, clamped to the ends. */
+        float active_x = 0.0f;
+        for (int i = 0; i < s->settings_tab; i++)
+            active_x += tab_widths[i];
+
+        float target = active_x
+                     - (view_w - tab_widths[s->settings_tab]) * 0.5f;
+        target = clampf(target, 0.0f, total_w - view_w);
+
+        /* Ease toward the target for a smooth cross-bar feel. */
+        s->settings_tab_scroll += (target - s->settings_tab_scroll) * 0.25f;
+
+        draw_x = margin - s->settings_tab_scroll;
+        clipped = true;
+    }
+
+    if (clipped)
+        render_begin_scissor((int)margin, (int)(y - scale * 1.0f),
+                             (int)view_w, (int)(scale * 10.0f));
 
     for (int i = 0; i < TAB_COUNT; i++) {
         int is_active = (i == s->settings_tab);
 
+        /* Skip tabs fully outside the clipped viewport. */
+        if (draw_x + tab_widths[i] < margin - 1.0f ||
+            draw_x > (float)w - margin + 1.0f) {
+            draw_x += tab_widths[i];
+            continue;
+        }
+
         /* Tab background */
         if (is_active) {
-            render_draw_rect(cursor_x, y - scale * 0.5f,
+            render_draw_rect(draw_x, y - scale * 0.5f,
                              tab_widths[i], scale * 7.0f,
                              0.84f, 0.42f, 0.0f, 0.9f);
         } else {
-            render_draw_rect(cursor_x, y - scale * 0.5f,
+            render_draw_rect(draw_x, y - scale * 0.5f,
                              tab_widths[i], scale * 7.0f,
                              0.12f, 0.20f, 0.35f, 0.6f);
         }
 
         /* Tab label */
-        float label_x = cursor_x + tab_padding;
+        float label_x = draw_x + tab_padding;
         float label_y = y + scale * 1.0f;
         render_draw_text(tab_names[i], label_x, label_y, scale,
                          is_active ? 1.0f : 0.6f,
@@ -148,8 +308,11 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
                          is_active ? 1.0f : 0.6f,
                          1.0f);
 
-        cursor_x += tab_widths[i];
+        draw_x += tab_widths[i];
     }
+
+    if (clipped)
+        render_end_scissor();
 }
 
 static void
@@ -196,12 +359,21 @@ screen_settings_draw(struct playos_shell *s)
 
     /* ── Tab content ── */
     float content_x = (float)w * 0.15f;
-    float content_y = header_scale * 30.0f;
     float label_scale = header_scale * 0.35f;
     float value_scale = label_scale;
 
+    /* Vertical scroll: content is clipped to a viewport so tabs can grow
+     * extra info/input lines without overflowing the screen. */
+    settings_clamp_content_scroll(s);
+    float content_top = settings_content_top(s);
+    float content_bottom = settings_content_bottom(s);
+    render_begin_scissor(0, (int)content_top, w,
+                         (int)(content_bottom - content_top));
+
+    float content_y = content_top - s->settings_content_scroll;
+
     switch (s->settings_tab) {
-    case 0: /* Display */
+    case TAB_DISPLAY: /* Display */
         {
             char buf[64];
             snprintf(buf, sizeof(buf), "%dx%d", s->output_width,
@@ -219,7 +391,7 @@ screen_settings_draw(struct playos_shell *s)
         }
         break;
 
-    case 1: /* Audio */
+    case TAB_AUDIO: /* Audio */
         draw_info_line(s, "Output", "Built-in Speakers",
                        content_x, &content_y, label_scale, value_scale);
         draw_info_line(s, "Volume", "75%",
@@ -228,7 +400,7 @@ screen_settings_draw(struct playos_shell *s)
                        content_x, &content_y, label_scale, value_scale);
         break;
 
-    case 2: /* Power */
+    case TAB_POWER: /* Power */
         {
             char buf[64];
             uint64_t total_mem = playos_system_total_memory_bytes();
@@ -248,7 +420,7 @@ screen_settings_draw(struct playos_shell *s)
         }
         break;
 
-    case 3: /* System */
+    case TAB_SYSTEM: /* System */
         {
             const char *device = playos_system_device_model();
             draw_info_line(s, "Device", device,
@@ -288,13 +460,37 @@ screen_settings_draw(struct playos_shell *s)
             }
         }
         break;
+
+    case TAB_NETWORK: /* Network */
+        draw_info_line(s, "Status", "Not Connected",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "Wi-Fi", "Disabled",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "Bluetooth", "Disabled",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "IP Address", "-",
+                       content_x, &content_y, label_scale, value_scale);
+        break;
+
+    case TAB_INPUT: /* Input */
+        draw_info_line(s, "Controller", "Built-in",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "D-Pad", "Active",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "Gyro", "Calibrated",
+                       content_x, &content_y, label_scale, value_scale);
+        draw_info_line(s, "Button Mapping", "Default",
+                       content_x, &content_y, label_scale, value_scale);
+        break;
     }
+
+    render_end_scissor();
 
     /* ── Navigation hint ── */
     float hint_scale = header_scale * 0.25f;
-    const char *hints = (s->settings_tab == 3)
+    const char *hints = (s->settings_tab == TAB_SYSTEM)
                             ? "[D-Pad] Navigate    [A] Select    [B] Back"
-                            : "[D-Pad] Switch Tab    [B] Back";
+                            : "[D-Pad] Switch Tab / Scroll    [B] Back";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
                      (float)h - hint_scale * 20.0f,
