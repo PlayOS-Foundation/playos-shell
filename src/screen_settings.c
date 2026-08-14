@@ -396,7 +396,7 @@ screen_settings_draw(struct playos_shell *s)
                        content_x, &content_y, label_scale, value_scale);
         draw_info_line(s, "Volume", "75%",
                        content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Audio Driver", "ALSA (PipeWire)",
+        draw_info_line(s, "Audio Driver", "ALSA",
                        content_x, &content_y, label_scale, value_scale);
         break;
 
