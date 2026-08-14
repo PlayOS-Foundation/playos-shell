@@ -117,17 +117,19 @@ main(int argc, char *argv[])
         playos_manager_v1_register_shell(mgr);
         PLAYOS_LOG_I("shell", "registered as trusted shell");
 
-        /* Notify init that the shell is ready (Sprint 5) */
+        /* Notify init that the shell is ready (Sprint 5).
+         * QueryStatus opens its own connection (connect→send→recv→close);
+         * do NOT pre-open a second connection via playos_trusted_connect()
+         * — the single-connection IPC server would block reading the unused
+         * fd and never serve the real request, deadlocking the shell. */
 #ifdef PLAYOS_TRUSTED_IPC
         {
-            int cfd = playos_trusted_connect();
-            if (cfd >= 0) {
-                /* Send a simple ready notification via QueryStatus —
-                 * the connection itself signals shell readiness to init */
-                char status_buf[256];
-                playos_trusted_query_status(cfd, status_buf, sizeof(status_buf));
-                playos_trusted_disconnect(cfd);
+            char status_buf[256];
+            if (playos_trusted_query_status(-1, status_buf,
+                                            sizeof(status_buf)) == 0) {
                 PLAYOS_LOG_I("shell", "shell ready notification sent");
+            } else {
+                PLAYOS_LOG_W("shell", "shell ready notification failed");
             }
         }
 #endif

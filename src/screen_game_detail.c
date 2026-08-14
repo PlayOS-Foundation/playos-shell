@@ -39,20 +39,18 @@ screen_game_detail_update(struct playos_shell *s)
 #ifdef PLAYOS_TRUSTED_IPC
         PLAYOS_LOG_I("shell", "game_detail: launching '%s' via IPC", game_id);
 
-        /* Per-call connect/launch/disconnect (same pattern as shell_ready) */
-        int fd = playos_trusted_connect();
-        if (fd >= 0) {
-            int ret = playos_trusted_launch_game(fd, game_id);
-            playos_trusted_disconnect(fd);
-            if (ret == 0) {
-                PLAYOS_LOG_I("shell", "game_detail: launch accepted for '%s'",
-                             game_id);
-            } else {
-                PLAYOS_LOG_E("shell", "game_detail: launch failed for '%s'",
-                             game_id);
-            }
+        /* playos_trusted_launch_game() opens its own connection
+         * (connect→send→recv→close). Do NOT pre-open a second connection
+         * via playos_trusted_connect() — the single-connection IPC server
+         * would block reading the unused fd and delay (or deadlock) the
+         * real launch request. */
+        int ret = playos_trusted_launch_game(-1, game_id);
+        if (ret == 0) {
+            PLAYOS_LOG_I("shell", "game_detail: launch accepted for '%s'",
+                         game_id);
         } else {
-            PLAYOS_LOG_E("shell", "game_detail: cannot connect to IPC for launch");
+            PLAYOS_LOG_E("shell", "game_detail: launch failed for '%s'",
+                         game_id);
         }
 #else
         PLAYOS_LOG_W("shell", "game_detail: launch requested for '%s' "
