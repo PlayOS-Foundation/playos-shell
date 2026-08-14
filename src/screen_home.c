@@ -19,8 +19,7 @@
 void
 screen_home_enter(struct playos_shell *s)
 {
-    (void)s;
-    /* Nothing to initialize */
+    s->home_cursor = 0;
 }
 
 /* ── Update ────────────────────────────────────────────────────────────── */
@@ -28,17 +27,25 @@ screen_home_enter(struct playos_shell *s)
 void
 screen_home_update(struct playos_shell *s)
 {
-    if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
-        /* A button → Library */
-        s->current_screen = SCREEN_LIBRARY;
-        screen_library_enter(s);
-        return;
+    /* D-pad up/down: move cursor between Library (0) and Settings (1) */
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+        if (s->home_cursor > 0)
+            s->home_cursor--;
+    }
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
+        if (s->home_cursor < 1)
+            s->home_cursor++;
     }
 
-    if (shell_input_button_pressed(s, PLAYOS_BUTTON_NORTH)) {
-        /* Y button → Settings */
-        s->current_screen = SCREEN_SETTINGS;
-        screen_settings_enter(s);
+    /* A: launch the selected menu item */
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+        if (s->home_cursor == 1) {
+            s->current_screen = SCREEN_SETTINGS;
+            screen_settings_enter(s);
+        } else {
+            s->current_screen = SCREEN_LIBRARY;
+            screen_library_enter(s);
+        }
         return;
     }
 }
@@ -95,20 +102,37 @@ screen_home_draw(struct playos_shell *s)
     /* ── Menu items ── */
     float menu_y = (float)h * 0.50f;
     float menu_scale = title_scale * 0.35f;
-    float pulse = 0.5f + 0.5f * sinf((float)s->elapsed_time * 2.0f);
 
-    /* "Press (A)  Library" */
-    const char *lib_text = "Press [A]  Library";
-    float lib_w = render_text_width(lib_text, menu_scale);
-    render_draw_text(lib_text, ((float)w - lib_w) * 0.5f, menu_y, menu_scale,
-                     0.84f, 0.42f, 0.0f, 0.7f + 0.3f * pulse);
+    static const char *menu_labels[2] = { "Library", "Settings" };
+    for (int i = 0; i < 2; i++) {
+        bool sel = (i == s->home_cursor);
+        float item_y = menu_y + menu_scale * 12.0f * (float)i;
 
-    /* "Press (Y)  Settings" */
-    const char *set_text = "Press [Y]  Settings";
-    float set_w = render_text_width(set_text, menu_scale);
-    render_draw_text(set_text, ((float)w - set_w) * 0.5f,
-                     menu_y + menu_scale * 12.0f, menu_scale,
-                     0.6f, 0.6f, 0.7f, 1.0f);
+        if (sel) {
+            /* Selection highlight background */
+            float label_w = render_text_width(menu_labels[i], menu_scale);
+            float box_w = label_w + menu_scale * 8.0f;
+            render_draw_rect(((float)w - box_w) * 0.5f,
+                             item_y - menu_scale * 1.0f,
+                             box_w, menu_scale * 8.0f,
+                             0.84f, 0.42f, 0.0f, 0.9f);
+        }
+
+        float label_w = render_text_width(menu_labels[i], menu_scale);
+        render_draw_text(menu_labels[i], ((float)w - label_w) * 0.5f,
+                         item_y, menu_scale,
+                         sel ? 1.0f : 0.6f,
+                         sel ? 1.0f : 0.6f,
+                         sel ? 1.0f : 0.7f,
+                         1.0f);
+    }
+
+    /* ── Menu navigation hint ── */
+    const char *menu_hint = "[D-Pad] Navigate    [A] Select";
+    float menu_hint_w = render_text_width(menu_hint, menu_scale * 0.6f);
+    render_draw_text(menu_hint, ((float)w - menu_hint_w) * 0.5f,
+                     menu_y + menu_scale * 12.0f * 2.0f + menu_scale * 2.0f,
+                     menu_scale * 0.6f, 0.5f, 0.5f, 0.6f, 1.0f);
 
     /* ── System info footer ── */
     float footer_scale = sub_scale * 0.6f;

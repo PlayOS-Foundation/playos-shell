@@ -34,6 +34,9 @@ struct playos_shell {
     bool               running;
     bool               configured;
 
+    /* ── Home menu cursor ── */
+    int    home_cursor;           /* 0 = Library, 1 = Settings */
+
     /* ── Input (evdev — trusted, keeps SYSTEM/QUICK_MENU) ── */
     int  evdev_fd;
     PlayOSControllerState controller;
