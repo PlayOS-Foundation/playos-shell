@@ -1,10 +1,10 @@
 /**********************************************************************************************
 *
-*   rcore_playos - PlayOS Shell platform backend (Wayland + EGL/GLES2)
+*   rcore_playos - PlayOS Shell platform backend (Wayland + EGL/GLES2 or GLES3)
 *
 *   PLATFORM: PLATFORM_PLAYOS
 *       - Native Wayland client backend for the PlayOS shell
-*       - Owns: fullscreen xdg_toplevel, wl_egl_window, EGL/GLES2 context,
+*       - Owns: fullscreen xdg_toplevel, wl_egl_window, EGL/GLES2/GLES3 context,
 *         and eglSwapBuffers (no wl_surface_frame pacing — see SwapScreenBuffer)
 *
 *   NOTES:
@@ -49,12 +49,21 @@
 #include <wayland-client.h> // Wayland client library
 #include <wayland-egl.h>    // Wayland EGL window (wl_egl_window)
 #include <EGL/egl.h>        // EGL library
-#include <GLES2/gl2.h>      // OpenGL ES 2.0 library
+#if defined(GRAPHICS_API_OPENGL_ES3)
+    #include <GLES3/gl3.h>  // OpenGL ES 3.0 library
+#else
+    #include <GLES2/gl2.h>  // OpenGL ES 2.0 library
+#endif
 
 #include "xdg-shell-client-protocol.h"
 #include "playos-v1-client-protocol.h"
 
 #include "playos/playos_input.h"   // PlayOS logical controller state
+
+// Ensure EGL_OPENGL_ES3_BIT is defined (older EGL headers may omit it)
+#ifndef EGL_OPENGL_ES3_BIT
+    #define EGL_OPENGL_ES3_BIT 0x40
+#endif
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -802,7 +811,7 @@ int InitPlatform(void)
         EGL_GREEN_SIZE,      8,
         EGL_BLUE_SIZE,       8,
         EGL_ALPHA_SIZE,      8,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RENDERABLE_TYPE, (rlGetVersion() == RL_OPENGL_ES_30) ? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,
         EGL_NONE
     };
     EGLint num_configs;
@@ -814,7 +823,7 @@ int InitPlatform(void)
     }
 
     EGLint ctx_attrs[] = {
-        EGL_CONTEXT_CLIENT_VERSION, 2,
+        EGL_CONTEXT_CLIENT_VERSION, (rlGetVersion() == RL_OPENGL_ES_30) ? 3 : 2,
         EGL_NONE
     };
     platform.egl_context = eglCreateContext(platform.egl_display, platform.egl_config,

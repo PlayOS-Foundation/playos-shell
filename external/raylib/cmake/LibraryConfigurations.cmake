@@ -194,7 +194,7 @@ elseif ("${PLATFORM}" STREQUAL "Memory")
 
 elseif ("${PLATFORM}" STREQUAL "PlayOS")
     set(PLATFORM_CPP "PLATFORM_PLAYOS")
-    set(GRAPHICS "GRAPHICS_API_OPENGL_ES2")
+    set(GRAPHICS "GRAPHICS_API_OPENGL_ES3")
 
     add_definitions(-DEGL_NO_X11)
     add_definitions(-D_DEFAULT_SOURCE)
