@@ -48,6 +48,17 @@ render_draw_rect(float x, float y, float w, float h,
 }
 
 void
+render_draw_triangle(float x1, float y1, float x2, float y2,
+                     float x3, float y3,
+                     float r, float g, float b, float a)
+{
+    DrawTriangle((Vector2){ x1, y1 },
+                 (Vector2){ x2, y2 },
+                 (Vector2){ x3, y3 },
+                 color_from_rgba(r, g, b, a));
+}
+
+void
 render_draw_text(const char *text, float x, float y,
                  float scale, float r, float g, float b, float a)
 {

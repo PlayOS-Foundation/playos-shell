@@ -61,22 +61,44 @@ screen_home_draw(struct playos_shell *s)
     /* ── PlayOS blue background ── */
     render_begin_frame(0.08f, 0.16f, 0.30f, 1.0f);
 
-    /* ── Animated accent bars (test-client pattern) ── */
-    float bar_speed = 0.3f;
-    float bar_width = (float)w * 0.08f;
+    /* ── Animated blue wave (PSP/PS3 media-bar style) ──
+     * Three overlapping sine ribbons flowing left-to-right, in shades of
+     * blue, fading with depth. Each ribbon is a triangle strip between its
+     * top edge (a travelling sine) and a parallel bottom edge. */
+    {
+        float wave_base  = (float)h * 0.58f;
+        float wave_amp   = (float)h * 0.11f;
+        float wave_freq  = 0.0065f;   /* radians per pixel */
+        float wave_speed = 1.8f;      /* phase radians per second */
+        int   steps      = 96;
+        float dx         = (float)w / (float)steps;
 
-    for (int i = 0; i < 3; i++) {
-        float phase = (float)(s->elapsed_time * bar_speed + (double)i * 0.33);
-        float offset = (float)(fmod(phase, 2.0) - 1.0) * (float)w;
+        for (int layer = 0; layer < 3; layer++) {
+            float phase  = (float)s->elapsed_time * wave_speed
+                           + (float)layer * 1.9f;
+            float amp    = wave_amp * (1.0f - 0.22f * (float)layer);
+            float base   = wave_base + (float)layer * (float)h * 0.035f;
+            float thick  = (float)h * 0.045f;
 
-        float brightness = 0.6f + 0.4f * sinf((float)(s->elapsed_time * 3.0 + (double)i));
-        float cr = 0.84f * brightness;
-        float cg = 0.42f * brightness;
-        float cb = 0.0f;
-        float ca = 0.3f + 0.5f * brightness;
+            float cr = 0.12f + 0.06f * (float)layer;
+            float cg = 0.38f + 0.12f * (float)layer;
+            float cb = 0.95f - 0.08f * (float)layer;
+            float ca = 0.40f - 0.08f * (float)layer;
 
-        render_draw_rect(offset - bar_width * 0.5f, 0.0f,
-                         bar_width, (float)h, cr, cg, cb, ca);
+            for (int i = 0; i < steps; i++) {
+                float x0 = (float)i * dx;
+                float x1 = x0 + dx;
+                float y0_top = base + sinf(x0 * wave_freq + phase) * amp;
+                float y1_top = base + sinf(x1 * wave_freq + phase) * amp;
+                float y0_bot = y0_top + thick;
+                float y1_bot = y1_top + thick;
+
+                render_draw_triangle(x0, y0_top, x1, y1_top,
+                                     x0, y0_bot, cr, cg, cb, ca);
+                render_draw_triangle(x1, y1_top, x1, y1_bot,
+                                     x0, y0_bot, cr, cg, cb, ca);
+            }
+        }
     }
 
     /* ── Title: "PlayOS" ── */
