@@ -82,6 +82,13 @@ main(int argc, char *argv[])
     s->dpi_scale = 1.0f;
     s->evdev_fd = -1;
 
+    /* Persistent async-event listener (Sprint 7). Opened by
+     * playos_trusted_register_shell() once trusted IPC is up; polled in
+     * the main loop for GameStarted/GameExited/GameCrashed events. */
+#ifdef PLAYOS_TRUSTED_IPC
+    int shell_listener_fd = -1;
+#endif
+
     /* ── Banner ── */
     PLAYOS_LOG_I("shell", "PlayOS Shell v0.1.0 starting");
     PLAYOS_LOG_I("shell", "Raylib %s via rcore_playos.c backend", RAYLIB_VERSION);
@@ -132,6 +139,15 @@ main(int argc, char *argv[])
                 PLAYOS_LOG_W("shell", "shell ready notification failed");
             }
         }
+
+        /* Register a PERSISTENT listener so playos-init can stream
+         * GameStarted/GameExited/GameCrashed events to us (S7-T7). */
+        shell_listener_fd = playos_trusted_register_shell();
+        if (shell_listener_fd >= 0)
+            PLAYOS_LOG_I("shell", "async event listener registered (fd %d)",
+                         shell_listener_fd);
+        else
+            PLAYOS_LOG_W("shell", "failed to register async event listener");
 #endif
     } else {
         PLAYOS_LOG_W("shell", "playos_manager_v1 not available — "
@@ -178,6 +194,29 @@ main(int argc, char *argv[])
                 }
             }
         }
+
+#ifdef PLAYOS_TRUSTED_IPC
+        /* Async game events streamed by playos-init (S7-T7). */
+        if (shell_listener_fd >= 0) {
+            char ev_type[64] = {0};
+            int r = playos_trusted_shell_poll(shell_listener_fd, ev_type,
+                                              sizeof(ev_type));
+            if (r == 1) {
+                if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_CRASHED) == 0)
+                    PLAYOS_LOG_W("shell", "async: game crashed");
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_EXITED) == 0)
+                    PLAYOS_LOG_I("shell", "async: game exited");
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_STARTED) == 0)
+                    PLAYOS_LOG_I("shell", "async: game started");
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_COMPOSITOR_STATE_CHANGED) == 0)
+                    PLAYOS_LOG_I("shell", "async: compositor state changed");
+            } else if (r < 0) {
+                PLAYOS_LOG_W("shell", "async listener closed by init");
+                playos_trusted_disconnect(shell_listener_fd);
+                shell_listener_fd = -1;
+            }
+        }
+#endif
 
         /* Update current screen */
         switch (s->current_screen) {
@@ -228,6 +267,11 @@ main(int argc, char *argv[])
 
     if (s->evdev_fd >= 0)
         close(s->evdev_fd);
+
+#ifdef PLAYOS_TRUSTED_IPC
+    if (shell_listener_fd >= 0)
+        playos_trusted_disconnect(shell_listener_fd);
+#endif
 
     return EXIT_SUCCESS;
 }

@@ -62,6 +62,7 @@ typedef struct {
     struct xdg_toplevel     *xdg_toplevel;
     struct wl_egl_window    *egl_window;
     struct playos_manager_v1 *playos_manager;
+    struct playos_overlay_v1  *playos_overlay;
 
     EGLDisplay egl_display;
     EGLSurface egl_surface;
@@ -87,6 +88,7 @@ int InitPlatform(void);          // Initialize platform (graphics, inputs and mo
 void ClosePlatform(void);        // Close platform
 
 static void platform_set_render_size(int width, int height);   // Update raylib render/viewport state on (re)configure
+static int  playos_wayland_connect(void);                      // Connect to Wayland display + bind globals (no surface)
 
 //----------------------------------------------------------------------------------
 // Module Functions Declaration
@@ -113,6 +115,9 @@ registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, playos_manager_v1_interface.name) == 0) {
         platform.playos_manager = wl_registry_bind(registry, name,
                                                    &playos_manager_v1_interface, 1);
+    } else if (strcmp(interface, playos_overlay_v1_interface.name) == 0) {
+        platform.playos_overlay = wl_registry_bind(registry, name,
+                                                   &playos_overlay_v1_interface, 1);
     }
 }
 
@@ -576,15 +581,46 @@ RLAPI struct playos_manager_v1 *platform_get_playos_manager(void)
     return platform.playos_manager;
 }
 
+// Get the bound playos_overlay_v1 proxy (may be NULL if the compositor does
+// not advertise the PlayOS overlay global).
+RLAPI struct playos_overlay_v1 *platform_get_playos_overlay(void)
+{
+    return platform.playos_overlay;
+}
+
+// Get the bound wl_surface (NULL until InitPlatform creates it).
+RLAPI struct wl_surface *platform_get_wl_surface(void)
+{
+    return platform.wl_surface;
+}
+
+// Flush queued Wayland requests immediately. Used by the overlay so
+// control-plane requests (request_dismiss, terminate) reach the compositor
+// without waiting for the next frame pump.
+RLAPI void platform_playos_flush(void)
+{
+    if (platform.wl_display) wl_display_flush(platform.wl_display);
+}
+
+// Connect to the Wayland display and bind the required globals WITHOUT
+// creating a surface. The overlay calls this before InitWindow() so it can
+// register as an overlay before the xdg_toplevel is created — otherwise the
+// shell/compositor ordering classifies the surface as a GAME window.
+RLAPI int platform_playos_preconnect(void)
+{
+    if (platform.wl_display != NULL) return 0;
+    return playos_wayland_connect();
+}
+
 //----------------------------------------------------------------------------------
 // Module Internal Functions Definition
 //----------------------------------------------------------------------------------
 
-// Initialize platform: graphics, inputs and more
-int InitPlatform(void)
+// Connect to the Wayland display, discover globals and bind the compositor,
+// xdg_wm_base and PlayOS manager/overlay interfaces. Surface creation is left
+// to InitPlatform.
+static int playos_wayland_connect(void)
 {
-    FLAG_SET(CORE.Window.flags, FLAG_FULLSCREEN_MODE);
-
     // Determine the Wayland display name
     const char *display_name = getenv("WAYLAND_DISPLAY");
     if ((display_name == NULL) || (display_name[0] == '\0')) display_name = "playos-0";
@@ -604,6 +640,19 @@ int InitPlatform(void)
     {
         TRACELOG(LOG_FATAL, "PLATFORM: PLAYOS: Required Wayland globals missing");
         return -1;
+    }
+
+    return 0;
+}
+
+// Initialize platform: graphics, inputs and more
+int InitPlatform(void)
+{
+    FLAG_SET(CORE.Window.flags, FLAG_FULLSCREEN_MODE);
+
+    if (platform.wl_display == NULL)
+    {
+        if (playos_wayland_connect() != 0) return -1;
     }
 
     // Create the fullscreen xdg_toplevel surface
@@ -753,6 +802,7 @@ void ClosePlatform(void)
     }
 
     if (platform.egl_window)    wl_egl_window_destroy(platform.egl_window);
+    if (platform.playos_overlay)  playos_overlay_v1_destroy(platform.playos_overlay);
     if (platform.playos_manager) playos_manager_v1_destroy(platform.playos_manager);
     if (platform.xdg_toplevel)  xdg_toplevel_destroy(platform.xdg_toplevel);
     if (platform.xdg_surface)   xdg_surface_destroy(platform.xdg_surface);
