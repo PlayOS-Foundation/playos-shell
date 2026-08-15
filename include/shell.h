@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "playos/playos_input.h"
+#include "playos/playos_power.h"
 
 /* Forward declaration: bound by the Raylib PlayOS backend (rcore_playos.c)
  * and consumed by main.c for the trusted-shell registration handshake. */
@@ -38,7 +39,9 @@ struct playos_shell {
     int    home_cursor;           /* 0 = Library, 1 = Settings */
 
     /* ── Input (evdev — trusted, keeps SYSTEM/QUICK_MENU) ── */
-    int  evdev_fd;
+    int  evdev_fd;             /* Main gamepad node (face buttons, sticks) */
+    int  evdev_home_fd;        /* Reserved home node (BTN_MODE w/o BTN_SOUTH) */
+    int  evdev_vendor_fd;      /* Reserved vendor node (Armoury Crate/CC/volume) */
     PlayOSControllerState controller;
     PlayOSControllerState controller_prev;  /* For edge detection */
     playos_button_mask_t   buttons_pressed; /* Event-level press edges this poll.
@@ -67,6 +70,11 @@ struct playos_shell {
 
     /* ── Lifecycle ── */
     bool   is_suspended;
+
+    /* ── Power / thermal status (Sprint 9) ── */
+    PlayOSPowerInfo  power_info;          /* Cached battery/temp/profile state */
+    bool             power_info_valid;    /* power_info has been filled */
+    struct timespec  last_status_refresh; /* Monotonic time of last refresh */
 
     /* ── Settings cursor ── */
     int    settings_tab;            /* active tab (see TAB_* enum in screen_settings.c) */

@@ -16,6 +16,7 @@
 #define _DEFAULT_SOURCE
 #endif
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -30,6 +31,8 @@
 #include "playos/playos_system.h"
 #include "playos/playos_logging.h"
 #include "playos/playos_lifecycle.h"
+#include "playos/playos_power.h"
+#include "playos/playos_audio.h"
 #ifdef PLAYOS_TRUSTED_IPC
 #include "playos-runtime/trusted_control.h"
 #endif
@@ -105,6 +108,28 @@ shell_audio_init(void)
     PLAYOS_LOG_I("shell", "audio device ready — UI sounds enabled");
 }
 
+/* One-time audio bootstrap (Sprint 9 follow-up): the Ally's Realtek codec
+ * powers up with the speaker pin muted and volume at minimum, and its card
+ * registers a few seconds after boot. The overlay's first-frame bootstrap can
+ * be skipped while it is hidden, so the shell (always foreground) retries here
+ * every frame until the mixer is available and the defaults have been set.
+ * playos_audio_set_*() itself is cheap while the mixer is not yet open
+ * (2s cooldown), so calling this per frame is harmless. */
+static bool g_audio_defaults_applied = false;
+
+static void
+shell_audio_apply_defaults(void)
+{
+    if (g_audio_defaults_applied)
+        return;
+
+    if (playos_audio_set_master_volume(0.7f) == 0 &&
+        playos_audio_set_muted(0) == 0) {
+        g_audio_defaults_applied = true;
+        PLAYOS_LOG_I("shell", "audio defaults applied (volume=0.70, unmuted)");
+    }
+}
+
 static void
 shell_audio_shutdown(void)
 {
@@ -128,6 +153,122 @@ handle_signal(int sig)
     PLAYOS_LOG_I("shell", "received signal %d, exiting", sig);
     if (g_shell)
         g_shell->running = false;
+}
+
+/* ── Power / thermal status bar (Sprint 9) ─────────────────────────────── */
+
+static const char *
+shell_perf_profile_name(int profile)
+{
+    switch (profile) {
+    case PLAYOS_PERF_POWER_SAVE:  return "Power Save";
+    case PLAYOS_PERF_PERFORMANCE: return "Performance";
+    case PLAYOS_PERF_BALANCED:
+    default:                      return "Balanced";
+    }
+}
+
+static const char *
+shell_thermal_state_name(int state)
+{
+    switch (state) {
+    case PLAYOS_THERMAL_WARM:     return "Warm";
+    case PLAYOS_THERMAL_HOT:      return "Hot";
+    case PLAYOS_THERMAL_CRITICAL: return "Critical";
+    case PLAYOS_THERMAL_NORMAL:
+    default:                      return "Normal";
+    }
+}
+
+static void
+shell_status_refresh(struct playos_shell *s)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    if (s->power_info_valid) {
+        double elapsed = (double)(now.tv_sec - s->last_status_refresh.tv_sec)
+                       + (double)(now.tv_nsec - s->last_status_refresh.tv_nsec)
+                         / 1e9;
+        if (elapsed < 30.0)
+            return;
+    }
+
+    if (playos_power_get_info(&s->power_info) == 0) {
+        s->power_info_valid = true;
+        s->last_status_refresh = now;
+    }
+}
+
+static void
+shell_status_bar_draw(struct playos_shell *s)
+{
+    int w = s->output_width;
+    int h = s->output_height;
+    float bar_h = (float)h * 0.06f;
+    if (bar_h < 24.0f)
+        bar_h = 24.0f;
+    float scale = bar_h / 24.0f;
+    float y = (float)h - bar_h;
+
+    render_draw_rect(0.0f, y, (float)w, bar_h, 0.0f, 0.0f, 0.0f, 0.55f);
+
+    char batt[64];
+    if (s->power_info.battery_percent >= 0) {
+        const char *ac = "";
+        if (s->power_info.power_state == PLAYOS_POWER_STATE_CHARGING)
+            ac = "  Charging";
+        else if (s->power_info.power_state == PLAYOS_POWER_STATE_CHARGED)
+            ac = "  AC";
+        snprintf(batt, sizeof(batt), "Battery: %d%%%s",
+                 s->power_info.battery_percent, ac);
+    } else {
+        snprintf(batt, sizeof(batt), "Battery: --");
+    }
+
+    char temp[96];
+    if (s->power_info.cpu_temp_c >= 0 && s->power_info.gpu_temp_c >= 0)
+        snprintf(temp, sizeof(temp), "CPU: %dC   GPU: %dC",
+                 s->power_info.cpu_temp_c, s->power_info.gpu_temp_c);
+    else if (s->power_info.cpu_temp_c >= 0)
+        snprintf(temp, sizeof(temp), "CPU: %dC", s->power_info.cpu_temp_c);
+    else if (s->power_info.gpu_temp_c >= 0)
+        snprintf(temp, sizeof(temp), "GPU: %dC", s->power_info.gpu_temp_c);
+    else
+        temp[0] = '\0';
+
+    const char *profile = shell_perf_profile_name(s->power_info.active_profile);
+    const char *thermal = shell_thermal_state_name(s->power_info.thermal_state);
+
+    float text_y = y + (bar_h - scale * 8.0f) * 0.5f;
+    if (text_y < y)
+        text_y = y + scale;
+
+    char left[256];
+    int n = snprintf(left, sizeof(left), "%s", batt);
+    if (temp[0] && n >= 0 && n < (int)sizeof(left))
+        n += snprintf(left + n, sizeof(left) - (size_t)n, "    %s", temp);
+    if (n >= 0 && n < (int)sizeof(left))
+        snprintf(left + n, sizeof(left) - (size_t)n, "    Profile: %s", profile);
+
+    float left_x = (float)w * 0.03f;
+    render_draw_text(left, left_x, text_y, scale, 0.85f, 0.85f, 0.9f, 1.0f);
+
+    /* Thermal state on the right, colour-coded. */
+    float tr = 0.30f, tg = 0.85f, tb = 0.40f;  /* Normal: green */
+    if (s->power_info.thermal_state == PLAYOS_THERMAL_WARM) {
+        tr = 1.00f; tg = 0.85f; tb = 0.30f;
+    } else if (s->power_info.thermal_state == PLAYOS_THERMAL_HOT) {
+        tr = 1.00f; tg = 0.55f; tb = 0.20f;
+    } else if (s->power_info.thermal_state == PLAYOS_THERMAL_CRITICAL) {
+        tr = 1.00f; tg = 0.25f; tb = 0.25f;
+    }
+
+    char thermal_text[64];
+    snprintf(thermal_text, sizeof(thermal_text), "Thermal: %s", thermal);
+    float thermal_w = render_text_width(thermal_text, scale);
+    render_draw_text(thermal_text, (float)w - thermal_w - (float)w * 0.03f,
+                     text_y, scale, tr, tg, tb, 1.0f);
 }
 
 /* ── Screen navigation helpers ───────────────────────────────────────── */
@@ -165,6 +306,8 @@ main(int argc, char *argv[])
     s->output_height = 1080;
     s->dpi_scale = 1.0f;
     s->evdev_fd = -1;
+    s->evdev_home_fd = -1;
+    s->evdev_vendor_fd = -1;
 
     /* Persistent async-event listener (Sprint 7). Opened by
      * playos_trusted_register_shell() once trusted IPC is up; polled in
@@ -261,6 +404,10 @@ main(int argc, char *argv[])
         /* Input — direct evdev, all buttons decoded in shell_input_poll() */
         shell_input_poll(s);
 
+        /* One-time audio bootstrap: unmute + default volume once the mixer
+         * card becomes available (see shell_audio_apply_defaults()). */
+        shell_audio_apply_defaults();
+
         /* UI sounds: confirm on A, navigation on d-pad / shoulders / back. */
         if (!s->is_suspended) {
             if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH))
@@ -311,6 +458,16 @@ main(int argc, char *argv[])
                     PLAYOS_LOG_I("shell", "async: game started");
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_COMPOSITOR_STATE_CHANGED) == 0)
                     PLAYOS_LOG_I("shell", "async: compositor state changed");
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_THERMAL_STATE_CHANGED) == 0) {
+                    PLAYOS_LOG_I("shell", "async: thermal state changed");
+                    s->last_status_refresh.tv_sec = 0;
+                    s->last_status_refresh.tv_nsec = 0;
+                }
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_PERF_PROFILE_CHANGED) == 0) {
+                    PLAYOS_LOG_I("shell", "async: performance profile changed");
+                    s->last_status_refresh.tv_sec = 0;
+                    s->last_status_refresh.tv_nsec = 0;
+                }
             } else if (r < 0) {
                 PLAYOS_LOG_W("shell", "async listener closed by init");
                 playos_trusted_disconnect(shell_listener_fd);
@@ -329,12 +486,15 @@ main(int argc, char *argv[])
 
         /* Draw current screen — skip while suspended/backgrounded */
         if (!s->is_suspended) {
+            shell_status_refresh(s);
             switch (s->current_screen) {
             case SCREEN_HOME:        screen_home_draw(s);        break;
             case SCREEN_LIBRARY:     screen_library_draw(s);     break;
             case SCREEN_GAME_DETAIL: screen_game_detail_draw(s); break;
             case SCREEN_SETTINGS:    screen_settings_draw(s);    break;
             }
+            if (s->power_info_valid)
+                shell_status_bar_draw(s);
             render_end_frame(s);   /* EndDrawing() + swap via backend */
             frame_count++;
         }
@@ -370,6 +530,10 @@ main(int argc, char *argv[])
 
     if (s->evdev_fd >= 0)
         close(s->evdev_fd);
+    if (s->evdev_home_fd >= 0)
+        close(s->evdev_home_fd);
+    if (s->evdev_vendor_fd >= 0)
+        close(s->evdev_vendor_fd);
 
 #ifdef PLAYOS_TRUSTED_IPC
     if (shell_listener_fd >= 0)

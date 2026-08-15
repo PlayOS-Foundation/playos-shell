@@ -78,8 +78,8 @@ screen_game_detail_draw(struct playos_shell *s)
     /* ── Background ── */
     render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
 
-    float title_scale = (float)h / 45.0f;
-    float sub_scale   = title_scale * 0.4f;
+    float title_scale = (float)h / 240.0f;
+    float sub_scale   = title_scale * 0.55f;
     float hint_scale  = sub_scale * 0.8f;
 
     /* ── Game title (display name from manifest, fallback to id) ── */
@@ -90,7 +90,7 @@ screen_game_detail_draw(struct playos_shell *s)
 
     float title_w = render_text_width(display_name, title_scale);
     float title_x = ((float)w - title_w) * 0.5f;
-    float title_y = (float)h * 0.10f;
+    float title_y = (float)h * 0.12f;
 
     render_draw_text(display_name, title_x, title_y, title_scale,
                      1.0f, 1.0f, 1.0f, 1.0f);
@@ -101,14 +101,14 @@ screen_game_detail_draw(struct playos_shell *s)
         snprintf(ver, sizeof(ver), "v%s", s->game_versions[idx]);
         float ver_w = render_text_width(ver, sub_scale);
         render_draw_text(ver, ((float)w - ver_w) * 0.5f,
-                         title_y + title_scale * 12.0f,
+                         title_y + title_scale * 10.0f,
                          sub_scale, 0.4f, 0.6f, 0.8f, 1.0f);
     }
 
     /* ── Icon placeholder ── */
     float icon_size = 160.0f;
     float icon_x = ((float)w - icon_size) * 0.5f;
-    float icon_y = title_y + title_scale * 14.0f;
+    float icon_y = title_y + title_scale * 16.0f;
 
     render_draw_rect(icon_x, icon_y, icon_size, icon_size,
                      0.15f, 0.25f, 0.40f, 1.0f);
@@ -131,7 +131,7 @@ screen_game_detail_draw(struct playos_shell *s)
                      sub_scale, 0.5f, 0.5f, 0.6f, 1.0f);
 
     /* ── Launch hint ── */
-    float launch_y = (float)h * 0.65f;
+    float launch_y = (float)h * 0.55f;
     const char *launch = "Press [A] to Launch";
     float launch_w = render_text_width(launch, sub_scale);
     render_draw_text(launch, ((float)w - launch_w) * 0.5f, launch_y,
@@ -141,6 +141,6 @@ screen_game_detail_draw(struct playos_shell *s)
     const char *back = "[B] Back to Library";
     float back_w = render_text_width(back, hint_scale);
     render_draw_text(back, ((float)w - back_w) * 0.5f,
-                     (float)h - hint_scale * 20.0f,
+                     (float)h - hint_scale * 45.0f,
                      hint_scale, 0.5f, 0.5f, 0.6f, 1.0f);
 }

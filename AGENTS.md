@@ -89,8 +89,8 @@ Button mappings:
 - `BTN_DPAD_*` or `ABS_HAT0X/Y` → d-pad (both forms handled, mutually exclusive)
 - `BTN_TL`/`BTN_TR` → L1/R1, `BTN_THUMBL`/`BTN_THUMBR` → L3/R3
 - `BTN_START`/`BTN_SELECT` → start/select
-- `BTN_MODE` → `PLAYOS_BUTTON_SYSTEM` (reserved)
-- `KEY_PROG1`/`KEY_PROG2`/`KEY_LEFTMETA`/`KEY_RIGHTMETA`/`BTN_TRIGGER_HAPPY1` → `PLAYOS_BUTTON_QUICK_MENU` (reserved)
+- `BTN_MODE`/`KEY_PROG1`/`BTN_TRIGGER_HAPPY1` → `PLAYOS_BUTTON_SYSTEM` (reserved)
+- `KEY_PROG2`/`BTN_TRIGGER_HAPPY2`/`KEY_LEFTMETA`/`KEY_RIGHTMETA` → `PLAYOS_BUTTON_QUICK_MENU` (reserved)
 
 ## Code Conventions
 

@@ -102,7 +102,7 @@ screen_home_draw(struct playos_shell *s)
     }
 
     /* ── Title: "PlayOS" ── */
-    float title_scale = (float)h / 100.0f;  /* Scale with screen height */
+    float title_scale = (float)h / 240.0f;  /* Scale with screen height */
     const char *title = "PlayOS";
     float title_w = render_text_width(title, title_scale);
     float title_x = ((float)w - title_w) * 0.5f;
@@ -112,7 +112,7 @@ screen_home_draw(struct playos_shell *s)
                      1.0f, 1.0f, 1.0f, 1.0f);
 
     /* ── Subtitle ── */
-    float sub_scale = title_scale * 0.4f;
+    float sub_scale = title_scale * 0.5f;
     const char *subtitle = "Gaming Console OS";
     float sub_w = render_text_width(subtitle, sub_scale);
     float sub_x = ((float)w - sub_w) * 0.5f;
@@ -123,7 +123,7 @@ screen_home_draw(struct playos_shell *s)
 
     /* ── Menu items ── */
     float menu_y = (float)h * 0.50f;
-    float menu_scale = title_scale * 0.35f;
+    float menu_scale = title_scale * 0.55f;
 
     static const char *menu_labels[2] = { "Library", "Settings" };
     for (int i = 0; i < 2; i++) {
@@ -151,14 +151,14 @@ screen_home_draw(struct playos_shell *s)
 
     /* ── Menu navigation hint ── */
     const char *menu_hint = "[D-Pad] Navigate    [A] Select";
-    float menu_hint_w = render_text_width(menu_hint, menu_scale * 0.6f);
+    float menu_hint_w = render_text_width(menu_hint, menu_scale * 0.7f);
     render_draw_text(menu_hint, ((float)w - menu_hint_w) * 0.5f,
                      menu_y + menu_scale * 12.0f * 2.0f + menu_scale * 2.0f,
-                     menu_scale * 0.6f, 0.5f, 0.5f, 0.6f, 1.0f);
+                     menu_scale * 0.7f, 0.5f, 0.5f, 0.6f, 1.0f);
 
     /* ── System info footer ── */
-    float footer_scale = sub_scale * 0.6f;
-    float footer_y = (float)h - footer_scale * 30.0f;
+    float footer_scale = sub_scale * 0.8f;
+    float footer_y = (float)h - footer_scale * 50.0f;
 
     char footer[256];
     const char *device = playos_system_device_model();

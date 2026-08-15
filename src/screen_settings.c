@@ -56,13 +56,13 @@ clampf(float v, float lo, float hi)
 static float
 settings_header_scale(const struct playos_shell *s)
 {
-    return (float)s->output_height / 50.0f;
+    return (float)s->output_height / 240.0f;
 }
 
 static float
 settings_label_scale(const struct playos_shell *s)
 {
-    return settings_header_scale(s) * 0.35f;
+    return settings_header_scale(s) * 0.5f;
 }
 
 /* Vertical advance of a single info line (label/value pair). */
@@ -89,7 +89,7 @@ static float
 settings_content_bottom(const struct playos_shell *s)
 {
     /* Leave room for the navigation hint near the bottom edge. */
-    return (float)s->output_height - settings_header_scale(s) * 8.0f;
+    return (float)s->output_height - settings_header_scale(s) * 22.0f;
 }
 
 static float
@@ -347,19 +347,19 @@ screen_settings_draw(struct playos_shell *s)
     render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
 
     /* ── Header ── */
-    float header_scale = (float)h / 50.0f;
+    float header_scale = settings_header_scale(s);
     const char *header = "Settings";
     float header_w = render_text_width(header, header_scale);
     render_draw_text(header, ((float)w - header_w) * 0.5f,
                      20.0f, header_scale, 1.0f, 1.0f, 1.0f, 1.0f);
 
     /* ── Tab bar ── */
-    float tab_scale = header_scale * 0.4f;
+    float tab_scale = header_scale * 0.6f;
     draw_tab_bar(s, header_scale * 18.0f, tab_scale);
 
     /* ── Tab content ── */
     float content_x = (float)w * 0.15f;
-    float label_scale = header_scale * 0.35f;
+    float label_scale = settings_label_scale(s);
     float value_scale = label_scale;
 
     /* Vertical scroll: content is clipped to a viewport so tabs can grow
@@ -415,7 +415,14 @@ screen_settings_draw(struct playos_shell *s)
             draw_info_line(s, "Available Memory", buf,
                            content_x, &content_y, label_scale, value_scale);
 
-            draw_info_line(s, "Performance Mode", "Balanced",
+            const char *profile = "Balanced";
+            if (s->power_info_valid) {
+                if (s->power_info.active_profile == PLAYOS_PERF_POWER_SAVE)
+                    profile = "Power Save";
+                else if (s->power_info.active_profile == PLAYOS_PERF_PERFORMANCE)
+                    profile = "Performance";
+            }
+            draw_info_line(s, "Performance Mode", profile,
                            content_x, &content_y, label_scale, value_scale);
         }
         break;
@@ -487,13 +494,13 @@ screen_settings_draw(struct playos_shell *s)
     render_end_scissor();
 
     /* ── Navigation hint ── */
-    float hint_scale = header_scale * 0.25f;
+    float hint_scale = header_scale * 0.45f;
     const char *hints = (s->settings_tab == TAB_SYSTEM)
                             ? "[D-Pad] Navigate    [A] Select    [B] Back"
                             : "[D-Pad] Switch Tab / Scroll    [B] Back";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
-                     (float)h - hint_scale * 20.0f,
+                     (float)h - hint_scale * 45.0f,
                      hint_scale, 0.5f, 0.5f, 0.6f, 1.0f);
 
     /* ── Power confirmation modal ── */
@@ -501,7 +508,7 @@ screen_settings_draw(struct playos_shell *s)
         render_draw_rect(0.0f, 0.0f, (float)w, (float)h,
                          0.0f, 0.0f, 0.0f, 0.7f);
 
-        float modal_scale = header_scale * 0.5f;
+        float modal_scale = header_scale * 0.55f;
         const char *action = (s->settings_power_cursor == 1)
                                  ? "Restart PlayOS?"
                                  : "Power off PlayOS?";

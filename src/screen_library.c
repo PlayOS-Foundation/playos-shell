@@ -548,7 +548,7 @@ screen_library_draw(struct playos_shell *s)
     render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
 
     /* ── Header ── */
-    float header_scale = (float)h / 50.0f;
+    float header_scale = (float)h / 240.0f;
     const char *header = "Library";
     float header_w = render_text_width(header, header_scale);
     render_draw_text(header, ((float)w - header_w) * 0.5f,
@@ -558,7 +558,7 @@ screen_library_draw(struct playos_shell *s)
     char count_text[64];
     snprintf(count_text, sizeof(count_text), "%d game(s) installed",
              s->game_count);
-    float count_scale = header_scale * 0.35f;
+    float count_scale = header_scale * 0.5f;
     float count_w = render_text_width(count_text, count_scale);
     render_draw_text(count_text, ((float)w - count_w) * 0.5f,
                      20.0f + header_scale * 12.0f, count_scale,
@@ -566,7 +566,7 @@ screen_library_draw(struct playos_shell *s)
 
     /* ── Empty state ── */
     if (s->game_count == 0) {
-        float empty_scale = header_scale * 0.4f;
+        float empty_scale = header_scale * 0.55f;
         /* Center the first line */
         const char *line1 = "No games installed.";
         float l1_w = render_text_width(line1, empty_scale);
@@ -599,10 +599,10 @@ screen_library_draw(struct playos_shell *s)
     }
 
     /* ── Navigation hints ── */
-    float hint_scale = header_scale * 0.25f;
+    float hint_scale = header_scale * 0.45f;
     const char *hints = "[A] Select    [B] Back    [D-Pad] Navigate";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
-                     (float)h - hint_scale * 20.0f,
+                     (float)h - hint_scale * 45.0f,
                      hint_scale, 0.5f, 0.5f, 0.6f, 1.0f);
 }
