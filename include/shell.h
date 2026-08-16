@@ -116,6 +116,10 @@ struct playos_shell {
     bool             power_info_valid;    /* power_info has been filled */
     struct timespec  last_status_refresh; /* Monotonic time of last refresh */
 
+    /* ── Display brightness (Sprint 9.5) ── */
+    int              display_brightness;        /* 0..100, -1 when unavailable */
+    bool             display_brightness_valid;  /* display_brightness filled */
+
     /* ── Settings cursor ── */
     int    settings_tab;            /* active tab (see TAB_* enum in screen_settings.c) */
     float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */

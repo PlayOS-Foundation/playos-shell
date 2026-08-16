@@ -13,6 +13,7 @@
 
 #include "shell.h"
 #include "playos/playos_audio.h"
+#include "playos/playos_display.h"
 #include "playos/playos_system.h"
 #include "playos/playos_logging.h"
 
@@ -112,6 +113,8 @@ settings_content_height(const struct playos_shell *s, int tab)
 
     switch (tab) {
     case TAB_DISPLAY:
+        /* Resolution / DPI / GPU + the interactive brightness row. */
+        return 4.0f * info_h;
     case TAB_AUDIO:
     case TAB_POWER:
         return 3.0f * info_h;
@@ -139,6 +142,41 @@ settings_clamp_content_scroll(struct playos_shell *s)
         max_scroll = 0.0f;
     s->settings_content_scroll =
         clampf(s->settings_content_scroll, 0.0f, max_scroll);
+}
+
+/* Adjust display brightness by delta percent, writing through the platform-api
+ * backlight helper. Returns the new cached value, or -1 when unsupported. */
+static int
+display_adjust_brightness(struct playos_shell *s, int delta)
+{
+    int current = s->display_brightness_valid ? s->display_brightness : 50;
+    int target = current + delta;
+
+    if (target < 0)
+        target = 0;
+    if (target > 100)
+        target = 100;
+
+    if (playos_display_set_brightness(target) == 0) {
+        s->display_brightness = target;
+        s->display_brightness_valid = true;
+        return target;
+    }
+
+    /* Re-sync from the real value: the write may have been rejected but the
+     * node may still be readable, and on no-node hardware both fail. */
+    {
+        int p = -1;
+        if (playos_display_get_brightness(&p) == 0) {
+            s->display_brightness = p;
+            s->display_brightness_valid = true;
+            return p;
+        }
+    }
+
+    s->display_brightness = -1;
+    s->display_brightness_valid = false;
+    return -1;
 }
 
 /* ── Enter ─────────────────────────────────────────────────────────────── */
@@ -219,6 +257,22 @@ screen_settings_update(struct playos_shell *s)
             s->power_confirm = true;
             return;
         }
+    } else if (s->settings_tab == TAB_DISPLAY) {
+        /* Display tab: refresh the cached brightness (platform-api applies
+         * a 1-second cache internally) and let d-pad up/down adjust it. */
+        int p = -1;
+        if (playos_display_get_brightness(&p) == 0) {
+            s->display_brightness = p;
+            s->display_brightness_valid = true;
+        } else {
+            s->display_brightness = -1;
+            s->display_brightness_valid = false;
+        }
+
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP))
+            display_adjust_brightness(s, 5);
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN))
+            display_adjust_brightness(s, -5);
     } else {
         /* Read-only tabs: scroll the info block so it can grow later. */
         float step = settings_line_step(s);
@@ -384,6 +438,36 @@ draw_trigger_gauge(float x, float y, float w, float h, float value)
     if (fill_w > 0.0f) {
         render_draw_rect(x, y, fill_w, h, 0.84f, 0.42f, 0.0f, 0.9f);
     }
+}
+
+/* Brightness row: label on the left, horizontal gauge in the middle, and an
+ * NN% value on the right — the same left/gauge/right layout as the trigger
+ * widgets in the Input tab. */
+static void
+draw_brightness_row(struct playos_shell *s, const char *label, int percent,
+                    float x, float *y, float label_scale, float value_scale)
+{
+    int w = s->output_width;
+    char buf[32];
+
+    render_draw_text(label, x, *y, label_scale, 0.6f, 0.6f, 0.7f, 1.0f);
+
+    float label_w = render_text_width(label, label_scale);
+    float gauge_x = x + label_w + label_scale * 2.0f;
+    float value_x = (float)w - x;
+    float gauge_w = value_x - gauge_x - label_scale * 14.0f;
+    if (gauge_w < label_scale * 10.0f)
+        gauge_w = label_scale * 10.0f;
+
+    draw_trigger_gauge(gauge_x, *y, gauge_w, label_scale * 5.0f,
+                       (float)percent / 100.0f);
+
+    snprintf(buf, sizeof(buf), "%d%%", percent);
+    float value_w = render_text_width(buf, value_scale);
+    render_draw_text(buf, value_x - value_w, *y, value_scale,
+                     0.9f, 0.9f, 0.9f, 1.0f);
+
+    *y += label_scale * 16.0f;
 }
 
 /* Analog stick indicator: a ring with a moving dot. The dot follows the
@@ -640,6 +724,15 @@ screen_settings_draw(struct playos_shell *s)
             const char *gpu = playos_system_gpu_description();
             draw_info_line(s, "GPU", gpu,
                            content_x, &content_y, label_scale, value_scale);
+
+            if (s->display_brightness_valid && s->display_brightness >= 0) {
+                draw_brightness_row(s, "Brightness", s->display_brightness,
+                                    content_x, &content_y, label_scale,
+                                    value_scale);
+            } else {
+                draw_info_line(s, "Brightness", "Unavailable",
+                               content_x, &content_y, label_scale, value_scale);
+            }
         }
         break;
 
@@ -759,9 +852,13 @@ screen_settings_draw(struct playos_shell *s)
 
     /* ── Navigation hint ── */
     float hint_scale = header_scale * 0.45f;
-    const char *hints = (s->settings_tab == TAB_SYSTEM)
-                            ? "[D-Pad] Navigate    [A] Select    [B] Back"
-                            : "[L1/R1] Switch Tab    [D-Pad] Scroll    [B] Back";
+    const char *hints;
+    if (s->settings_tab == TAB_SYSTEM)
+        hints = "[D-Pad] Navigate    [A] Select    [B] Back";
+    else if (s->settings_tab == TAB_DISPLAY)
+        hints = "[L1/R1] Switch Tab    [D-Pad] Brightness    [B] Back";
+    else
+        hints = "[L1/R1] Switch Tab    [D-Pad] Scroll    [B] Back";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
                      (float)h - hint_scale * 45.0f,
