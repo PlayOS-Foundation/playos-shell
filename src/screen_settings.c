@@ -12,6 +12,7 @@
  */
 
 #include "shell.h"
+#include "playos/playos_audio.h"
 #include "playos/playos_system.h"
 #include "playos/playos_logging.h"
 
@@ -635,12 +636,30 @@ screen_settings_draw(struct playos_shell *s)
         break;
 
     case TAB_AUDIO: /* Audio */
-        draw_info_line(s, "Output", "Built-in Speakers",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Volume", "75%",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Audio Driver", "ALSA",
-                       content_x, &content_y, label_scale, value_scale);
+        {
+            draw_info_line(s, "Output", "Built-in Speakers",
+                           content_x, &content_y, label_scale, value_scale);
+
+            PlayOSAudioInfo audio;
+            if (playos_audio_get_info(&audio) == 0) {
+                char vol[32];
+                if (audio.muted) {
+                    snprintf(vol, sizeof(vol), "%.0f%% (muted)",
+                             audio.master_volume * 100.0f);
+                } else {
+                    snprintf(vol, sizeof(vol), "%.0f%%",
+                             audio.master_volume * 100.0f);
+                }
+                draw_info_line(s, "Volume", vol,
+                               content_x, &content_y, label_scale, value_scale);
+            } else {
+                draw_info_line(s, "Volume", "-",
+                               content_x, &content_y, label_scale, value_scale);
+            }
+
+            draw_info_line(s, "Audio Driver", "ALSA",
+                           content_x, &content_y, label_scale, value_scale);
+        }
         break;
 
     case TAB_POWER: /* Power */

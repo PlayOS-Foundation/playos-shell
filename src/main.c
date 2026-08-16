@@ -218,7 +218,7 @@ shell_status_bar_draw(struct playos_shell *s)
     float bar_h = (float)h * 0.06f;
     if (bar_h < 24.0f)
         bar_h = 24.0f;
-    float scale = bar_h / 24.0f * s->dpi_scale;
+    float scale = bar_h / 24.0f * s->dpi_scale + 0.5f;  /* +0.5 bump for status text */
     float y = (float)h - bar_h;
 
     render_draw_rect(0.0f, y, (float)w, bar_h, 0.0f, 0.0f, 0.0f, 0.55f);
