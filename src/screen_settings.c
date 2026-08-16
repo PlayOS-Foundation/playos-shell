@@ -82,7 +82,10 @@ settings_row_step(const struct playos_shell *s)
 static float
 settings_content_top(const struct playos_shell *s)
 {
-    return settings_header_scale(s) * 30.0f;
+    /* Small gap below the tab bar (tab bar bottom sits at 18.0 +
+     * 0.6*7.0 = 22.2 header scales), so 24.0 leaves a tight, even
+     * separation instead of the previous oversized gap. */
+    return settings_header_scale(s) * 24.0f;
 }
 
 static float
@@ -182,14 +185,14 @@ screen_settings_update(struct playos_shell *s)
 
     int prev_tab = s->settings_tab;
 
-    /* D-pad L/R: switch tab (wraps around the strip). */
-    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
+    /* Shoulder L1/R1: switch tab (wraps around the strip). */
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_L1)) {
         if (s->settings_tab > 0)
             s->settings_tab--;
         else
             s->settings_tab = TAB_COUNT - 1;
     }
-    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT)) {
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_R1)) {
         if (s->settings_tab < TAB_COUNT - 1)
             s->settings_tab++;
         else
@@ -731,7 +734,7 @@ screen_settings_draw(struct playos_shell *s)
     float hint_scale = header_scale * 0.45f;
     const char *hints = (s->settings_tab == TAB_SYSTEM)
                             ? "[D-Pad] Navigate    [A] Select    [B] Back"
-                            : "[D-Pad] Switch Tab / Scroll    [B] Back";
+                            : "[L1/R1] Switch Tab    [D-Pad] Scroll    [B] Back";
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
                      (float)h - hint_scale * 45.0f,

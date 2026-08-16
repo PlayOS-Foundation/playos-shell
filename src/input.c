@@ -901,8 +901,12 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
             s->raw_evdev_valid = true;
         }
 
-        if (shell_input_process_event(s, &ev))
-            break; /* Process one kernel frame per poll */
+        /* Drain every queued event, not just the first kernel frame. The
+         * controller reports analog axes faster than the 60 FPS render loop,
+         * so limiting the drain to one EV_SYN batch left newer stick/trigger
+         * values sitting in the kernel buffer until the next frame — that
+         * coalescing backlog is what made the Live Input Test feel laggy. */
+        shell_input_process_event(s, &ev);
     }
 }
 
