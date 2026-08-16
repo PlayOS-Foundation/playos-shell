@@ -101,41 +101,41 @@ screen_home_draw(struct playos_shell *s)
         }
     }
 
-    /* ── Title: "PlayOS" — "Play" white, "OS" purple→blue gradient ── */
-    /* Scale with screen height + DPI, then tripled per the "big PlayOS"
-     * home-screen logo request. Text stays "Play" (P capital, lay lowercase)
-     * + "OS" (capital), so it reads PlayOS. */
-    float title_scale = (float)h / 240.0f * s->dpi_scale * 3.0f;
+    /* ── Title: "PlayOS" — "Play" white, "OS" purple→blue gradient ──
+     * Only the wordmark is tripled; subtitle/menu/footer keep the base
+     * scale so the rest of the home screen layout stays unchanged. */
+    float base_scale = (float)h / 240.0f * s->dpi_scale;
+    float logo_scale = base_scale * 3.0f;
     const char *play = "Play";
     const char *os   = "OS";
-    float play_w   = render_text_width(play, title_scale);
-    float os_w     = render_text_width(os, title_scale);
-    float full_w   = render_text_width("PlayOS", title_scale);
+    float play_w   = render_text_width(play, logo_scale);
+    float os_w     = render_text_width(os, logo_scale);
+    float full_w   = render_text_width("PlayOS", logo_scale);
     float title_x  = ((float)w - full_w) * 0.5f;
     float title_y  = (float)h * 0.20f;
     /* Reconstruct the exact combined-word layout: the gap is whatever the
      * glyph spacing difference makes Play + OS sum to "PlayOS". */
     float os_x     = title_x + play_w + (full_w - play_w - os_w);
 
-    render_draw_text(play, title_x, title_y, title_scale,
+    render_draw_text(play, title_x, title_y, logo_scale,
                      1.0f, 1.0f, 1.0f, 1.0f);
-    render_draw_text_gradient(os, os_x, title_y, title_scale,
+    render_draw_text_gradient(os, os_x, title_y, logo_scale,
                               0.22f, 0.74f, 0.97f,  /* bottom: bluish */
                               0.75f, 0.52f, 0.99f); /* top: purple */
 
     /* ── Subtitle ── */
-    float sub_scale = title_scale * 0.5f;
+    float sub_scale = base_scale * 0.5f;
     const char *subtitle = "Gaming Console OS";
     float sub_w = render_text_width(subtitle, sub_scale);
     float sub_x = ((float)w - sub_w) * 0.5f;
-    float sub_y = title_y + title_scale * 10.0f;
+    float sub_y = title_y + logo_scale * 10.0f;
 
     render_draw_text(subtitle, sub_x, sub_y, sub_scale,
                      0.7f, 0.7f, 0.8f, 1.0f);
 
     /* ── Menu items ── */
     float menu_y = (float)h * 0.50f;
-    float menu_scale = title_scale * 0.55f;
+    float menu_scale = base_scale * 0.55f;
 
     static const char *menu_labels[2] = { "Library", "Settings" };
     for (int i = 0; i < 2; i++) {
