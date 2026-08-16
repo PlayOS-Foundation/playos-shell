@@ -515,12 +515,21 @@ main(int argc, char *argv[])
             int r = playos_trusted_shell_poll(shell_listener_fd, ev_type,
                                               sizeof(ev_type));
             if (r == 1) {
-                if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_CRASHED) == 0)
+                if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_CRASHED) == 0) {
                     PLAYOS_LOG_W("shell", "async: game crashed");
-                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_EXITED) == 0)
+                    s->is_suspended = false;
+                } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_EXITED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game exited");
-                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_STARTED) == 0)
+                    s->is_suspended = false;
+                } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_STARTED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game started");
+                    /* A foreground game occludes the shell surface. Suspend
+                     * drawing so the main loop keeps polling evdev at full
+                     * cadence instead of blocking on Wayland frame callbacks
+                     * for an invisible window (the cause of in-game volume
+                     * keys not being drained until the game exits). */
+                    s->is_suspended = true;
+                }
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_COMPOSITOR_STATE_CHANGED) == 0)
                     PLAYOS_LOG_I("shell", "async: compositor state changed");
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_THERMAL_STATE_CHANGED) == 0) {

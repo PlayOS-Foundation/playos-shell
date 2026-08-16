@@ -473,6 +473,7 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     static double system_latch_until = 0.0;
     static double quick_latch_until = 0.0;
     static double power_latch_until = 0.0;
+    static double rear_macro_latch_until = 0.0;
 
     float cursor_x = x;
     for (size_t i = 0; i < pill_count; i++) {
@@ -513,7 +514,14 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     vol_cursor_x += input_pill_width("VOL+", scale) + gap;
     draw_input_pill(vol_cursor_x, *y, "VOL-", s->volume_down_held, scale);
     vol_cursor_x += input_pill_width("VOL-", scale) + gap;
-    draw_input_pill(vol_cursor_x, *y, "M1/M2", s->rear_macro_held, scale);
+
+    /* M1/M2 arrive as KEY_CUT pulses with the release following within a
+     * frame or two, so latch the visual the same way as SYSTEM/QUICK_MENU. */
+    if (s->rear_macro_pressed)
+        rear_macro_latch_until = s->elapsed_time + 0.6;
+    bool rear_macro_held = s->rear_macro_held ||
+                           (s->elapsed_time < rear_macro_latch_until);
+    draw_input_pill(vol_cursor_x, *y, "M1/M2", rear_macro_held, scale);
 
     /* Analog triggers (LT/RT, ABS_Z/ABS_RZ) get full-width pedal gauges.
      * Analog sticks (LS/RS, ABS_X/Y/RX/RY) get their own dedicated row with
@@ -764,7 +772,7 @@ screen_settings_draw(struct playos_shell *s)
         render_draw_rect(0.0f, 0.0f, (float)w, (float)h,
                          0.0f, 0.0f, 0.0f, 0.7f);
 
-        float modal_scale = header_scale * 0.55f;
+        float modal_scale = header_scale * 0.75f;
         const char *action = (s->settings_power_cursor == 1)
                                  ? "Restart PlayOS?"
                                  : "Power off PlayOS?";
@@ -774,9 +782,9 @@ screen_settings_draw(struct playos_shell *s)
                          1.0f, 1.0f, 1.0f, 1.0f);
 
         const char *confirm_hint = "A: Confirm    B: Cancel";
-        float confirm_w = render_text_width(confirm_hint, modal_scale * 0.6f);
+        float confirm_w = render_text_width(confirm_hint, modal_scale * 0.72f);
         render_draw_text(confirm_hint, ((float)w - confirm_w) * 0.5f,
-                         (float)h * 0.52f, modal_scale * 0.6f,
+                         (float)h * 0.52f, modal_scale * 0.72f,
                          0.8f, 0.8f, 0.9f, 1.0f);
     }
 }

@@ -772,6 +772,8 @@ static int shell_input_process_event(struct playos_shell *s,
          * Tracked shell-local (not a public game button) for the Live
          * Input Test only. */
         case KEY_CUT:
+            if (ev->value != 0 && !s->rear_macro_held)
+                s->rear_macro_pressed = true;
             s->rear_macro_held = (ev->value != 0);
             break;
 
@@ -922,6 +924,7 @@ void shell_input_poll(struct playos_shell *s)
     /* Save previous state for edge detection */
     s->controller_prev = s->controller;
     s->buttons_pressed = 0;
+    s->rear_macro_pressed = false;
 
     double now = s->elapsed_time;
 

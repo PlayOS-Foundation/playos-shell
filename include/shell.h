@@ -65,6 +65,7 @@ struct playos_shell {
     bool   volume_up_held;       /* vendor KEY_VOLUMEUP currently held */
     bool   volume_down_held;     /* vendor KEY_VOLUMEDOWN currently held */
     bool   rear_macro_held;      /* ROG Ally rear macro M1/M2 (KEY_CUT, shared) */
+    bool   rear_macro_pressed;   /* Event-level press edge this poll (fast tap) */
 
     /* ── Analog trigger calibration (evdev ABS_Z / ABS_RZ) ── */
     int    trigger_lt_min, trigger_lt_max;   /* Left trigger raw range */
