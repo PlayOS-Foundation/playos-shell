@@ -24,6 +24,7 @@
 #include <time.h>
 #include <math.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #include "raylib.h"
 #include "shell.h"
@@ -281,6 +282,50 @@ shell_status_bar_draw(struct playos_shell *s)
                      text_y, scale, tr, tg, tb, 1.0f);
 }
 
+/* ── Screenshot capture (System tab, COMMAND reserved button) ────────────
+ * Writes a PNG straight into the persistent USB data partition so captures
+ * survive across boots and can be pulled off the stick. We read the current
+ * framebuffer with LoadImageFromScreen() and export to an absolute path with
+ * ExportImage() — Raylib's TakeScreenshot() is not usable here because it
+ * prefixes CORE.Storage.basePath instead of honoring absolute paths. */
+static void
+shell_take_screenshot(struct playos_shell *s)
+{
+    mkdir("/data/screenshots", 0755);   /* best-effort; /data persists on USB */
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    char path[256];
+    snprintf(path, sizeof(path), "/data/screenshots/playos-%ld.%03ld.png",
+             (long)ts.tv_sec, (long)(ts.tv_nsec / 1000000));
+
+    Image img = LoadImageFromScreen();
+    if (img.data != NULL) {
+        s->screenshot_ok = ExportImage(img, path);
+        UnloadImage(img);
+    } else {
+        s->screenshot_ok = false;
+    }
+
+    s->screenshot_flash_until = s->elapsed_time + 1.5;
+    PLAYOS_LOG_I("shell", "screenshot -> %s (ok=%d)", path, (int)s->screenshot_ok);
+}
+
+static void
+shell_screenshot_toast_draw(struct playos_shell *s)
+{
+    const char *msg = s->screenshot_ok ? "Screenshot saved" : "Screenshot failed";
+    float scale = (float)s->output_height / 240.0f * s->dpi_scale * 0.7f;
+    float w = render_text_width(msg, scale);
+    float x = ((float)s->output_width - w) * 0.5f;
+    float y = (float)s->output_height * 0.12f;
+
+    render_draw_rect(x - scale * 2.0f, y - scale, w + scale * 4.0f,
+                     scale * 9.0f, 0.0f, 0.0f, 0.0f, 0.75f);
+    render_draw_text(msg, x, y, scale, 1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 /* ── Screen navigation helpers ───────────────────────────────────────── */
 
 static void
@@ -469,6 +514,14 @@ main(int argc, char *argv[])
          * shell_input_poll() on one fresh frame (no Raylib one-frame lag). */
         shell_input_poll(s);
 
+        /* Screenshot trigger: COMMAND reserved button, gated by the System
+         * settings toggle. Only armed while the shell is foreground — when a
+         * game owns the framebuffer the shell is suspended and must not grab
+         * the screen. */
+        if (!s->is_suspended && s->screenshot_enabled &&
+            shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU))
+            s->screenshot_pending = true;
+
         /* One-time audio bootstrap: unmute + default volume once the mixer
          * card becomes available (see shell_audio_apply_defaults()). */
         shell_audio_apply_defaults();
@@ -569,6 +622,17 @@ main(int argc, char *argv[])
             }
             if (s->power_info_valid)
                 shell_status_bar_draw(s);
+
+            /* Capture after the screen and status bar are drawn but before
+             * the toast, so the saved PNG never contains the toast itself. */
+            if (s->screenshot_pending) {
+                shell_take_screenshot(s);
+                s->screenshot_pending = false;
+            }
+
+            if (s->elapsed_time < s->screenshot_flash_until)
+                shell_screenshot_toast_draw(s);
+
             render_end_frame(s);   /* EndDrawing() + swap via backend */
             frame_count++;
         }

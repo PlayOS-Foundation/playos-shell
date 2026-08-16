@@ -119,8 +119,8 @@ settings_content_height(const struct playos_shell *s, int tab)
     case TAB_POWER:
         return 3.0f * info_h;
     case TAB_SYSTEM:
-        /* 4 info lines + gap + 2 selectable power rows. */
-        return 4.0f * info_h + row_h + 2.0f * row_h;
+        /* 4 info lines + gap + screenshot toggle row + 2 power rows. */
+        return 4.0f * info_h + row_h + 3.0f * row_h;
     case TAB_NETWORK:
         return 4.0f * info_h;
     case TAB_INPUT:
@@ -201,7 +201,7 @@ screen_settings_update(struct playos_shell *s)
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
             /* A: confirm the selected power action. */
 #ifdef PLAYOS_TRUSTED_IPC
-            if (s->settings_power_cursor == 1) {
+            if (s->settings_power_cursor == 2) {
                 PLAYOS_LOG_I("shell", "settings: reboot confirmed");
                 playos_trusted_reboot(-1);
             } else {
@@ -244,18 +244,24 @@ screen_settings_update(struct playos_shell *s)
 
     /* D-pad U/D: vertical navigation / scrolling. */
     if (s->settings_tab == TAB_SYSTEM) {
-        /* System tab: move between the two power actions. */
+        /* System tab: 0 = Screenshot toggle, 1 = Power Off, 2 = Restart. */
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
             if (s->settings_power_cursor > 0)
                 s->settings_power_cursor--;
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
-            if (s->settings_power_cursor < 1)
+            if (s->settings_power_cursor < 2)
                 s->settings_power_cursor++;
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
-            s->power_confirm = true;
-            return;
+            if (s->settings_power_cursor == 0) {
+                s->screenshot_enabled = !s->screenshot_enabled;
+                PLAYOS_LOG_I("shell", "settings: screenshot capture %s",
+                             s->screenshot_enabled ? "enabled" : "disabled");
+            } else {
+                s->power_confirm = true;
+                return;
+            }
         }
     } else if (s->settings_tab == TAB_DISPLAY) {
         /* Display tab: refresh the cached brightness (platform-api applies
@@ -468,6 +474,60 @@ draw_brightness_row(struct playos_shell *s, const char *label, int percent,
                      0.9f, 0.9f, 0.9f, 1.0f);
 
     *y += label_scale * 16.0f;
+}
+
+/* On/off toggle switch: a rounded track with a knob that slides left/right.
+ * Used for the screenshot-capture setting so the state reads at a glance
+ * without needing a separate "ON"/"OFF" text label. */
+static void
+draw_toggle_switch(float cx, float cy, float scale, bool on)
+{
+    float track_w = scale * 12.0f;
+    float track_h = scale * 6.0f;
+    float knob_r  = track_h * 0.5f;
+    float track_x = cx - track_w * 0.5f;
+    float track_y = cy - track_h * 0.5f;
+
+    render_draw_rect(track_x, track_y, track_w, track_h,
+                     on ? 0.84f : 0.25f,
+                     on ? 0.42f : 0.30f,
+                     on ? 0.00f : 0.40f,
+                     0.95f);
+
+    float knob_x = on ? (track_x + track_w - knob_r) : (track_x + knob_r);
+    render_draw_circle(knob_x, cy, knob_r * 0.85f,
+                       on ? 1.0f : 0.7f,
+                       on ? 1.0f : 0.7f,
+                       on ? 1.0f : 0.7f,
+                       1.0f);
+}
+
+/* Selectable System-tab row: "Screenshot on COMMAND" label plus the toggle.
+ * Pressing A on this row flips screenshot_enabled rather than opening the
+ * power confirmation modal. */
+static void
+draw_screenshot_toggle_row(struct playos_shell *s, float x, float *y,
+                           float scale, bool selected)
+{
+    int w = s->output_width;
+    float row_w = (float)w - x * 2.0f;
+    float row_h = scale * 7.0f;
+
+    if (selected)
+        render_draw_rect(x, *y - scale * 0.5f, row_w, row_h,
+                         0.84f, 0.42f, 0.0f, 0.9f);
+
+    render_draw_text("Screenshot on COMMAND", x, *y - scale * 0.5f, scale,
+                     selected ? 1.0f : 0.6f,
+                     selected ? 1.0f : 0.6f,
+                     selected ? 1.0f : 0.6f,
+                     1.0f);
+
+    float switch_cx = (float)w - x - scale * 6.0f;
+    float switch_cy = *y + row_h * 0.5f - scale * 0.5f;
+    draw_toggle_switch(switch_cx, switch_cy, scale, s->screenshot_enabled);
+
+    *y += scale * 8.0f;
 }
 
 /* Analog stick indicator: a ring with a moving dot. The dot follows the
@@ -808,12 +868,16 @@ screen_settings_draw(struct playos_shell *s)
             draw_info_line(s, "Locale", locale,
                            content_x, &content_y, label_scale, value_scale);
 
-            /* ── Power actions ── */
+            /* ── Screenshot toggle + power actions ── */
             content_y += label_scale * 8.0f;
+            draw_screenshot_toggle_row(s, content_x, &content_y,
+                                       label_scale,
+                                       s->settings_power_cursor == 0);
+
             static const char *power_labels[2] = { "Power Off", "Restart" };
             float row_w = (float)w - content_x * 2.0f;
             for (int i = 0; i < 2; i++) {
-                bool sel = (i == s->settings_power_cursor);
+                bool sel = (i + 1 == s->settings_power_cursor);
                 if (sel) {
                     render_draw_rect(content_x,
                                      content_y - label_scale * 0.5f,
@@ -870,7 +934,7 @@ screen_settings_draw(struct playos_shell *s)
                          0.0f, 0.0f, 0.0f, 0.7f);
 
         float modal_scale = header_scale * 0.75f;
-        const char *action = (s->settings_power_cursor == 1)
+        const char *action = (s->settings_power_cursor == 2)
                                  ? "Restart PlayOS?"
                                  : "Power off PlayOS?";
         float action_w = render_text_width(action, modal_scale);

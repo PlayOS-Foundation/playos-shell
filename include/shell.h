@@ -125,8 +125,14 @@ struct playos_shell {
     float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */
     float  settings_content_scroll; /* vertical content scroll offset (px) */
     /* ── Power actions (System tab) ── */
-    int    settings_power_cursor;   /* 0 = Power Off, 1 = Restart */
+    int    settings_power_cursor;   /* 0 = Screenshot, 1 = Power Off, 2 = Restart */
     bool   power_confirm;           /* confirmation dialog active */
+
+    /* ── Screenshot (System tab, COMMAND reserved button) ── */
+    bool   screenshot_enabled;      /* capture on COMMAND when true */
+    bool   screenshot_pending;      /* one-frame request to capture */
+    bool   screenshot_ok;           /* last capture result */
+    double screenshot_flash_until;  /* elapsed_time until toast hides */
     /* ── (ipc_fd removed — per-call connect/launch/disconnect pattern) ── */
 };
 
