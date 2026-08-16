@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 project(playos-shell
     VERSION 0.1.0
-    DESCRIPTION "PlayOS controller-first shell (Wayland + EGL/GLES2)"
+    DESCRIPTION "PlayOS controller-first shell (Wayland + EGL/GLES3)"
     LANGUAGES C
 )
 
@@ -101,7 +101,7 @@ endif()
 
 # Select raylib's custom PlayOS platform backend before it configures
 set(PLATFORM "PlayOS" CACHE STRING "raylib platform" FORCE)
-set(OPENGL_VERSION "ES 2.0" CACHE STRING "raylib OpenGL version" FORCE)
+set(OPENGL_VERSION "ES 3.0" CACHE STRING "raylib OpenGL version" FORCE)
 
 add_subdirectory(external/raylib)
 
