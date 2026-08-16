@@ -107,6 +107,103 @@ render_draw_text(const char *text, float x, float y,
                fontSize, spacing, color_from_rgba(r, g, b, a));
 }
 
+/* ── Gradient text ────────────────────────────────────────────────────────
+ * Draws a string with the white glyph atlas recolored by a vertical gradient
+ * (bottom color → top color). The gradient spans the full string using
+ * gl_FragCoord, so it reads as one continuous word rather than per-glyph
+ * tints. Falls back to a solid mid-tone if the shader fails to compile. */
+static Shader s_gradient_shader = { 0 };
+static bool   s_gradient_ready = false;
+static bool   s_gradient_tried = false;
+static int    s_gradient_loc_bottom = -1;
+static int    s_gradient_loc_top    = -1;
+static int    s_gradient_loc_range  = -1;
+
+static const char *s_gradient_vs =
+    "#version 100\n"
+    "attribute vec3 vertexPosition;\n"
+    "attribute vec2 vertexTexCoord;\n"
+    "attribute vec4 vertexColor;\n"
+    "uniform mat4 mvp;\n"
+    "varying vec2 fragTexCoord;\n"
+    "varying vec4 fragColor;\n"
+    "void main() {\n"
+    "    fragTexCoord = vertexTexCoord;\n"
+    "    fragColor = vertexColor;\n"
+    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
+    "}\n";
+
+static const char *s_gradient_fs =
+    "#version 100\n"
+    "precision mediump float;\n"
+    "varying vec2 fragTexCoord;\n"
+    "varying vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 gradientBottom;\n"
+    "uniform vec4 gradientTop;\n"
+    "uniform vec2 gradientRange;\n"
+    "void main() {\n"
+    "    float a = texture2D(texture0, fragTexCoord).a;\n"
+    "    float t = clamp((gl_FragCoord.y - gradientRange.x) / (gradientRange.y - gradientRange.x), 0.0, 1.0);\n"
+    "    vec3 c = mix(gradientBottom.rgb, gradientTop.rgb, t);\n"
+    "    gl_FragColor = vec4(c, a * fragColor.a);\n"
+    "}\n";
+
+static void
+gradient_shader_init(void)
+{
+    if (s_gradient_tried)
+        return;
+    s_gradient_tried = true;
+
+    s_gradient_shader = LoadShaderFromMemory(s_gradient_vs, s_gradient_fs);
+    if (s_gradient_shader.id == 0) {
+        PLAYOS_LOG_W("shell", "gradient text shader failed — using solid fallback");
+        return;
+    }
+    s_gradient_loc_bottom = GetShaderLocation(s_gradient_shader, "gradientBottom");
+    s_gradient_loc_top    = GetShaderLocation(s_gradient_shader, "gradientTop");
+    s_gradient_loc_range  = GetShaderLocation(s_gradient_shader, "gradientRange");
+    s_gradient_ready = true;
+}
+
+void
+render_draw_text_gradient(const char *text, float x, float y, float scale,
+                          float bottom_r, float bottom_g, float bottom_b,
+                          float top_r, float top_g, float top_b)
+{
+    if (!text) return;
+
+    float fontSize = scale * 7.0f;
+    float spacing  = scale;
+    Font font = s_ui_font.texture.id ? s_ui_font : GetFontDefault();
+
+    gradient_shader_init();
+    if (!s_gradient_ready) {
+        render_draw_text(text, x, y, scale,
+                         (bottom_r + top_r) * 0.5f,
+                         (bottom_g + top_g) * 0.5f,
+                         (bottom_b + top_b) * 0.5f, 1.0f);
+        return;
+    }
+
+    /* gl_FragCoord origin is bottom-left; raylib screen origin is top-left. */
+    int   sh        = GetScreenHeight();
+    float gl_bottom = (float)sh - (y + fontSize);
+    float gl_top    = (float)sh - y;
+    float bottom[4] = { bottom_r, bottom_g, bottom_b, 1.0f };
+    float top[4]    = { top_r, top_g, top_b, 1.0f };
+    float range[2]  = { gl_bottom, gl_top };
+
+    SetShaderValue(s_gradient_shader, s_gradient_loc_bottom, bottom, SHADER_UNIFORM_VEC4);
+    SetShaderValue(s_gradient_shader, s_gradient_loc_top,    top,    SHADER_UNIFORM_VEC4);
+    SetShaderValue(s_gradient_shader, s_gradient_loc_range,  range,  SHADER_UNIFORM_VEC2);
+
+    BeginShaderMode(s_gradient_shader);
+    DrawTextEx(font, text, (Vector2){ x, y }, fontSize, spacing, WHITE);
+    EndShaderMode();
+}
+
 void
 render_screen_dims(int *w, int *h)
 {

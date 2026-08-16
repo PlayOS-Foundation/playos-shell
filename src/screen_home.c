@@ -101,15 +101,24 @@ screen_home_draw(struct playos_shell *s)
         }
     }
 
-    /* ── Title: "PlayOS" ── */
+    /* ── Title: "PlayOS" — "Play" white, "OS" purple→blue gradient ── */
     float title_scale = (float)h / 240.0f * s->dpi_scale;  /* Scale with screen height + DPI */
-    const char *title = "PlayOS";
-    float title_w = render_text_width(title, title_scale);
-    float title_x = ((float)w - title_w) * 0.5f;
-    float title_y = (float)h * 0.20f;
+    const char *play = "Play";
+    const char *os   = "OS";
+    float play_w   = render_text_width(play, title_scale);
+    float os_w     = render_text_width(os, title_scale);
+    float full_w   = render_text_width("PlayOS", title_scale);
+    float title_x  = ((float)w - full_w) * 0.5f;
+    float title_y  = (float)h * 0.20f;
+    /* Reconstruct the exact combined-word layout: the gap is whatever the
+     * glyph spacing difference makes Play + OS sum to "PlayOS". */
+    float os_x     = title_x + play_w + (full_w - play_w - os_w);
 
-    render_draw_text(title, title_x, title_y, title_scale,
+    render_draw_text(play, title_x, title_y, title_scale,
                      1.0f, 1.0f, 1.0f, 1.0f);
+    render_draw_text_gradient(os, os_x, title_y, title_scale,
+                              0.22f, 0.74f, 0.97f,  /* bottom: bluish */
+                              0.75f, 0.52f, 0.99f); /* top: purple */
 
     /* ── Subtitle ── */
     float sub_scale = title_scale * 0.5f;

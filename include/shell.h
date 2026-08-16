@@ -182,6 +182,9 @@ void render_begin_scissor(int x, int y, int w, int h);
 void render_end_scissor(void);
 void render_draw_text(const char *text, float x, float y,
                       float scale, float r, float g, float b, float a);
+void render_draw_text_gradient(const char *text, float x, float y, float scale,
+                               float bottom_r, float bottom_g, float bottom_b,
+                               float top_r, float top_g, float top_b);
 void render_begin_frame(float r, float g, float b, float a);
 void render_end_frame(struct playos_shell *s);
 void render_screen_dims(int *w, int *h);
