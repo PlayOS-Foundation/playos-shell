@@ -102,7 +102,10 @@ screen_home_draw(struct playos_shell *s)
     }
 
     /* ── Title: "PlayOS" — "Play" white, "OS" purple→blue gradient ── */
-    float title_scale = (float)h / 240.0f * s->dpi_scale;  /* Scale with screen height + DPI */
+    /* Scale with screen height + DPI, then tripled per the "big PlayOS"
+     * home-screen logo request. Text stays "Play" (P capital, lay lowercase)
+     * + "OS" (capital), so it reads PlayOS. */
+    float title_scale = (float)h / 240.0f * s->dpi_scale * 3.0f;
     const char *play = "Play";
     const char *os   = "OS";
     float play_w   = render_text_width(play, title_scale);
