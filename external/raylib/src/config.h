@@ -46,7 +46,7 @@
     #define SUPPORT_MODULE_RTEXT        1       // WARNING: It requires SUPPORT_MODULE_RTEXTURES to load sprite font textures
 #endif
 #ifndef SUPPORT_MODULE_RMODELS
-    #define SUPPORT_MODULE_RMODELS      0       // PlayOS: 3D model rendering unused by shell
+    #define SUPPORT_MODULE_RMODELS      1       // PlayOS: 3D model rendering (enabled for 3D shader samples)
 #endif
 #ifndef SUPPORT_MODULE_RAUDIO
     #define SUPPORT_MODULE_RAUDIO       1       // PlayOS: ALSA audio via miniaudio (Sprint 8)
