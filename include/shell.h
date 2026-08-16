@@ -26,6 +26,18 @@ enum playos_screen {
     SCREEN_SETTINGS,
 };
 
+/* ── Reserved-button evdev nodes ────────────────────────────────────────
+ * The ROG Ally splits reserved keys (Home, Command Center, Armoury Crate,
+ * volume) across several "Asus Keyboard" event nodes. Open all of them (each
+ * exactly once) and drain them independently, instead of a single fd per role
+ * that can double-open the same node and miss the real volume node. */
+#define SHELL_MAX_RESERVED_FDS 8
+
+struct shell_reserved_fd {
+    int  fd;
+    char name[16];   /* short diagnostic label: home/vendor/volume/asus */
+};
+
 /* ── Central shell state ─────────────────────────────────────────────── */
 
 struct playos_shell {
@@ -40,14 +52,29 @@ struct playos_shell {
 
     /* ── Input (evdev — trusted, keeps SYSTEM/QUICK_MENU) ── */
     int  evdev_fd;             /* Main gamepad node (face buttons, sticks) */
-    int  evdev_home_fd;        /* Reserved home node (BTN_MODE w/o BTN_SOUTH) */
-    int  evdev_vendor_fd;      /* Reserved vendor node (Armoury Crate/CC/volume) */
+    struct shell_reserved_fd reserved_fds[SHELL_MAX_RESERVED_FDS];
+    int  reserved_fd_count;    /* Number of valid entries in reserved_fds[] */
     PlayOSControllerState controller;
     PlayOSControllerState controller_prev;  /* For edge detection */
     playos_button_mask_t   buttons_pressed; /* Event-level press edges this poll.
                                                Catches press+release within one
                                                frame (fast taps) that the net
                                                state diff would otherwise drop. */
+    bool   volume_up_held;       /* vendor KEY_VOLUMEUP currently held */
+    bool   volume_down_held;     /* vendor KEY_VOLUMEDOWN currently held */
+
+    /* ── Analog trigger calibration (evdev ABS_Z / ABS_RZ) ── */
+    int    trigger_lt_min, trigger_lt_max;   /* Left trigger raw range */
+    int    trigger_rt_min, trigger_rt_max;   /* Right trigger raw range */
+    bool   trigger_lt_calibrated;
+    bool   trigger_rt_calibrated;
+
+    /* ── Raw evdev diagnostic (Live Input Test) ── */
+    uint16_t raw_evdev_type;      /* Latest non-SYN event type */
+    uint16_t raw_evdev_code;      /* Latest non-SYN event code */
+    int32_t  raw_evdev_value;     /* Latest non-SYN event value */
+    char     raw_evdev_dev[16];   /* Which monitored node delivered it */
+    bool     raw_evdev_valid;
 
     /* ── Output ── */
     int    output_width;
@@ -136,5 +163,6 @@ void render_begin_frame(float r, float g, float b, float a);
 void render_end_frame(struct playos_shell *s);
 void render_screen_dims(int *w, int *h);
 float render_text_width(const char *text, float scale);
+void render_font_init(void);
 
 #endif /* PLAYOS_SHELL_H */

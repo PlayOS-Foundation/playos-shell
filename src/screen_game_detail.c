@@ -78,7 +78,7 @@ screen_game_detail_draw(struct playos_shell *s)
     /* ── Background ── */
     render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
 
-    float title_scale = (float)h / 240.0f;
+    float title_scale = (float)h / 240.0f * s->dpi_scale;
     float sub_scale   = title_scale * 0.55f;
     float hint_scale  = sub_scale * 0.8f;
 

@@ -548,7 +548,7 @@ screen_library_draw(struct playos_shell *s)
     render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
 
     /* ── Header ── */
-    float header_scale = (float)h / 240.0f;
+    float header_scale = (float)h / 240.0f * s->dpi_scale;
     const char *header = "Library";
     float header_w = render_text_width(header, header_scale);
     render_draw_text(header, ((float)w - header_w) * 0.5f,

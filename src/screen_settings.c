@@ -56,7 +56,7 @@ clampf(float v, float lo, float hi)
 static float
 settings_header_scale(const struct playos_shell *s)
 {
-    return (float)s->output_height / 240.0f;
+    return (float)s->output_height / 240.0f * s->dpi_scale;
 }
 
 static float
@@ -115,8 +115,11 @@ settings_content_height(const struct playos_shell *s, int tab)
         /* 4 info lines + gap + 2 selectable power rows. */
         return 4.0f * info_h + row_h + 2.0f * row_h;
     case TAB_NETWORK:
-    case TAB_INPUT:
         return 4.0f * info_h;
+    case TAB_INPUT:
+        /* Title + raw evdev row + pill rows + volume row + two trigger gauge
+         * rows + mask row. */
+        return 14.0f * info_h;
     default:
         return 0.0f;
     }
@@ -299,9 +302,12 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
                              0.12f, 0.20f, 0.35f, 0.6f);
         }
 
-        /* Tab label */
+        /* Tab label — vertically centered inside the 7*scale-tall tab
+         * background. DrawTextEx treats position.y as the top of the text,
+         * and the text height is 7*scale, so its top aligns with the
+         * background's top (y - 0.5*scale). */
         float label_x = draw_x + tab_padding;
-        float label_y = y + scale * 1.0f;
+        float label_y = y - scale * 0.5f;
         render_draw_text(tab_names[i], label_x, label_y, scale,
                          is_active ? 1.0f : 0.6f,
                          is_active ? 1.0f : 0.6f,
@@ -333,6 +339,184 @@ draw_info_line(struct playos_shell *s, const char *label, const char *value,
     }
 
     *y += label_scale * 16.0f;
+}
+
+/* ── Input test widget ────────────────────────────────────────────────── */
+
+static float
+input_pill_width(const char *label, float scale)
+{
+    return render_text_width(label, scale) + scale * 6.0f;
+}
+
+static void
+draw_input_pill(float x, float y, const char *label, bool held, float scale)
+{
+    const float w = input_pill_width(label, scale);
+    const float h = scale * 7.0f;
+    const float pad = scale * 3.0f;
+
+    if (held) {
+        render_draw_rect(x, y - scale * 0.5f, w, h,
+                         0.84f, 0.42f, 0.0f, 0.9f);
+        render_draw_text(label, x + pad, y - scale * 0.5f, scale,
+                         1.0f, 1.0f, 1.0f, 1.0f);
+    } else {
+        render_draw_rect(x, y - scale * 0.5f, w, h,
+                         0.12f, 0.20f, 0.35f, 0.6f);
+        render_draw_text(label, x + pad, y - scale * 0.5f, scale,
+                         0.6f, 0.6f, 0.7f, 1.0f);
+    }
+}
+
+/* Analog trigger gauge: a pedal-style horizontal bar with a fill that
+ * grows from left to right as the trigger is squeezed. */
+static void
+draw_trigger_gauge(float x, float y, float w, float h, float value)
+{
+    render_draw_rect(x, y, w, h, 0.12f, 0.20f, 0.35f, 0.6f);
+
+    float fill_w = w * clampf(value, 0.0f, 1.0f);
+    if (fill_w > 0.0f) {
+        render_draw_rect(x, y, fill_w, h, 0.84f, 0.42f, 0.0f, 0.9f);
+    }
+}
+
+/* Live view of every button the shell can see, including the reserved
+ * SYSTEM/QUICK_MENU buttons and hardware volume keys. This is a diagnostic
+ * widget only; game processes still never receive the reserved buttons. */
+static void
+draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
+{
+    static const struct {
+        const char *label;
+        playos_button_mask_t mask;
+    } pills[] = {
+        { "A",        PLAYOS_BUTTON_SOUTH },
+        { "B",        PLAYOS_BUTTON_EAST },
+        { "X",        PLAYOS_BUTTON_WEST },
+        { "Y",        PLAYOS_BUTTON_NORTH },
+        { "UP",       PLAYOS_BUTTON_DPAD_UP },
+        { "DOWN",     PLAYOS_BUTTON_DPAD_DOWN },
+        { "LEFT",     PLAYOS_BUTTON_DPAD_LEFT },
+        { "RIGHT",    PLAYOS_BUTTON_DPAD_RIGHT },
+        { "L1",       PLAYOS_BUTTON_L1 },
+        { "R1",       PLAYOS_BUTTON_R1 },
+        { "L3",       PLAYOS_BUTTON_L3 },
+        { "R3",       PLAYOS_BUTTON_R3 },
+        { "START",    PLAYOS_BUTTON_START },
+        { "SELECT",   PLAYOS_BUTTON_SELECT },
+        { "HOME",     PLAYOS_BUTTON_SYSTEM },
+        { "COMMAND",  PLAYOS_BUTTON_QUICK_MENU },
+    };
+
+    const float row_h = scale * 16.0f;
+    const float gap = scale * 2.0f;
+    const size_t pill_count = sizeof(pills) / sizeof(pills[0]);
+
+    render_draw_text("Live Input Test", x, *y, scale,
+                     0.9f, 0.9f, 0.9f, 1.0f);
+    *y += row_h;
+
+    /* Raw evdev code of the most recent event from any monitored node
+     * (gamepad, home, vendor, volume). Shows code/value even for keys that
+     * are not part of the logical PlayOS button mask. */
+    if (s->raw_evdev_valid) {
+        char raw[112];
+        snprintf(raw, sizeof(raw),
+                 "raw %-7s type=%u code=0x%03X value=%d",
+                 s->raw_evdev_dev[0] ? s->raw_evdev_dev : "-",
+                 (unsigned)s->raw_evdev_type,
+                 (unsigned)s->raw_evdev_code,
+                 s->raw_evdev_value);
+        render_draw_text(raw, x, *y, scale, 0.6f, 0.6f, 0.7f, 1.0f);
+    } else {
+        render_draw_text("raw (no events yet)", x, *y, scale,
+                         0.6f, 0.6f, 0.7f, 1.0f);
+    }
+    *y += row_h;
+
+    /* hid-asus emits the Home (SYSTEM) and Command Center (QUICK_MENU)
+     * reserved buttons as momentary pulses: the release follows within a
+     * frame or two, so the raw level state lights the pill for only a split
+     * second. Latch the visual for a short window so a press is clearly
+     * visible while testing. */
+    static double system_latch_until = 0.0;
+    static double quick_latch_until = 0.0;
+
+    float cursor_x = x;
+    for (size_t i = 0; i < pill_count; i++) {
+        bool held = (s->controller.buttons & pills[i].mask) != 0;
+
+        if (pills[i].mask == PLAYOS_BUTTON_SYSTEM) {
+            if (s->buttons_pressed & PLAYOS_BUTTON_SYSTEM)
+                system_latch_until = s->elapsed_time + 0.6;
+            held = held || (s->elapsed_time < system_latch_until);
+        } else if (pills[i].mask == PLAYOS_BUTTON_QUICK_MENU) {
+            if (s->buttons_pressed & PLAYOS_BUTTON_QUICK_MENU)
+                quick_latch_until = s->elapsed_time + 0.6;
+            held = held || (s->elapsed_time < quick_latch_until);
+        }
+
+        float pill_w = input_pill_width(pills[i].label, scale);
+
+        /* Flow-wrap to the content viewport when a pill would overflow. */
+        if (cursor_x > x &&
+            cursor_x + pill_w > (float)s->output_width - x) {
+            *y += row_h;
+            cursor_x = x;
+        }
+
+        draw_input_pill(cursor_x, *y, pills[i].label, held, scale);
+        cursor_x += pill_w + gap;
+    }
+
+    /* Hardware volume keys arrive on their own Asus Keyboard node, so they
+     * are tracked separately from the PlayOS controller button mask. */
+    *y += row_h;
+    draw_input_pill(x, *y, "VOL+", s->volume_up_held, scale);
+    draw_input_pill(x + input_pill_width("VOL+", scale) + gap, *y,
+                    "VOL-", s->volume_down_held, scale);
+
+    /* Analog triggers (LT/RT) arrive as ABS_Z / ABS_RZ axes, not as button
+     * bits, so they are drawn as pedal gauges instead of pills. */
+    float trigger_label_x = x;
+    float trigger_gauge_x = x + scale * 10.0f;
+    float trigger_value_x = (float)s->output_width - x;
+    float trigger_gauge_w = trigger_value_x - trigger_gauge_x - scale * 14.0f;
+    if (trigger_gauge_w < scale * 10.0f)
+        trigger_gauge_w = scale * 10.0f;
+    float trigger_gauge_h = scale * 5.0f;
+
+    *y += row_h;
+    float lt = s->controller.axes[PLAYOS_AXIS_LEFT_TRIGGER];
+    char tbuf[32];
+    render_draw_text("LT", trigger_label_x, *y, scale,
+                     0.9f, 0.9f, 0.9f, 1.0f);
+    draw_trigger_gauge(trigger_gauge_x, *y, trigger_gauge_w, trigger_gauge_h,
+                       lt);
+    snprintf(tbuf, sizeof(tbuf), "%3.0f%%", lt * 100.0f);
+    render_draw_text(tbuf, trigger_value_x - render_text_width(tbuf, scale),
+                     *y, scale, 0.9f, 0.9f, 0.9f, 1.0f);
+    *y += row_h;
+
+    float rt = s->controller.axes[PLAYOS_AXIS_RIGHT_TRIGGER];
+    render_draw_text("RT", trigger_label_x, *y, scale,
+                     0.9f, 0.9f, 0.9f, 1.0f);
+    draw_trigger_gauge(trigger_gauge_x, *y, trigger_gauge_w, trigger_gauge_h,
+                       rt);
+    snprintf(tbuf, sizeof(tbuf), "%3.0f%%", rt * 100.0f);
+    render_draw_text(tbuf, trigger_value_x - render_text_width(tbuf, scale),
+                     *y, scale, 0.9f, 0.9f, 0.9f, 1.0f);
+    *y += row_h;
+
+    char buf[48];
+    snprintf(buf, sizeof(buf), "0x%08X", (unsigned)s->controller.buttons);
+    render_draw_text("mask", x, *y, scale, 0.6f, 0.6f, 0.7f, 1.0f);
+    float value_w = render_text_width(buf, scale);
+    render_draw_text(buf, (float)s->output_width - x - value_w, *y,
+                     scale, 0.9f, 0.9f, 0.9f, 1.0f);
+    *y += row_h;
 }
 
 /* ── Draw ──────────────────────────────────────────────────────────────── */
@@ -457,7 +641,8 @@ screen_settings_draw(struct playos_shell *s)
                                      row_w, label_scale * 7.0f,
                                      0.84f, 0.42f, 0.0f, 0.9f);
                 }
-                render_draw_text(power_labels[i], content_x, content_y,
+                render_draw_text(power_labels[i], content_x,
+                                 content_y - label_scale * 0.5f,
                                  label_scale,
                                  sel ? 1.0f : 0.6f,
                                  sel ? 1.0f : 0.6f,
@@ -480,14 +665,7 @@ screen_settings_draw(struct playos_shell *s)
         break;
 
     case TAB_INPUT: /* Input */
-        draw_info_line(s, "Controller", "Built-in",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "D-Pad", "Active",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Gyro", "Calibrated",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Button Mapping", "Default",
-                       content_x, &content_y, label_scale, value_scale);
+        draw_input_test_widget(s, content_x, &content_y, label_scale);
         break;
     }
 

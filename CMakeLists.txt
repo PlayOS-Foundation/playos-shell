@@ -190,4 +190,4 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS playos-shell RUNTIME DESTINATION bin)
 install(DIRECTORY assets/ DESTINATION share/playos-shell/assets
-        FILES_MATCHING PATTERN "*.bmp")
+        FILES_MATCHING PATTERN "*.bmp" PATTERN "*.ttf")

@@ -102,7 +102,7 @@ screen_home_draw(struct playos_shell *s)
     }
 
     /* ── Title: "PlayOS" ── */
-    float title_scale = (float)h / 240.0f;  /* Scale with screen height */
+    float title_scale = (float)h / 240.0f * s->dpi_scale;  /* Scale with screen height + DPI */
     const char *title = "PlayOS";
     float title_w = render_text_width(title, title_scale);
     float title_x = ((float)w - title_w) * 0.5f;

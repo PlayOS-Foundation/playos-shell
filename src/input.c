@@ -206,17 +206,43 @@ static int is_reserved_vendor_device(int fd)
            !TEST_BIT(BTN_MODE,  key_bits);
 }
 
-static int find_reserved_device(const char *label, int (*match)(int))
+/* Append one reserved node fd to the shell's drain list. */
+static void
+shell_input_add_reserved_fd(struct playos_shell *s, int fd, const char *name)
 {
-    PLAYOS_LOG_I("input", "scanning /dev/input/event* for %s...", label);
+    if (s->reserved_fd_count >= SHELL_MAX_RESERVED_FDS) {
+        PLAYOS_LOG_W("input", "too many reserved nodes; dropping '%s'", name);
+        close(fd);
+        return;
+    }
+
+    s->reserved_fds[s->reserved_fd_count].fd = fd;
+    snprintf(s->reserved_fds[s->reserved_fd_count].name,
+             sizeof(s->reserved_fds[s->reserved_fd_count].name), "%s", name);
+    s->reserved_fd_count++;
+}
+
+/* Open ALL reserved Asus/vendor/home evdev nodes, each exactly once.
+ *
+ * Sprint 9 input retest showed the ROG Ally exposes three "Asus Keyboard"
+ * nodes (event6/7/8 in that build). The old per-role discovery opened
+ * event8 twice — once as the vendor node and again as the volume node — and
+ * never opened event6/event7, so KEY_VOLUMEUP/DOWN never reached the shell.
+ * We now scan once, exclude the gamepad, and keep every node that is an Asus
+ * node or matches the home/vendor capability matchers. Volume keys are then
+ * decoded from whichever node actually emits them. */
+static void
+shell_input_open_reserved_nodes(struct playos_shell *s)
+{
+    PLAYOS_LOG_I("input", "scanning /dev/input/event* for reserved nodes...");
+
+    s->reserved_fd_count = 0;
 
     DIR *dir = opendir("/dev/input");
     if (!dir) {
         PLAYOS_LOG_W("input", "cannot open /dev/input: %s", strerror(errno));
-        return -1;
+        return;
     }
-
-    int found_fd = -1;
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -230,37 +256,232 @@ static int find_reserved_device(const char *label, int (*match)(int))
         if (fd < 0)
             continue;
 
-        if (match(fd)) {
-            char name[256] = {0};
-            ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
-            PLAYOS_LOG_I("input", "found %s: '%s' (%s) fd=%d",
-                         label, name, path, fd);
-            found_fd = fd;
-            break;
+        /* The main gamepad node must stay on s->evdev_fd only. */
+        if (is_gamepad_device(fd)) {
+            close(fd);
+            continue;
+        }
+
+        char name[256] = {0};
+        ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
+
+        int asus   = strstr(name, "Asus") || strstr(name, "asus") ||
+                     strstr(name, "ASUS");
+        int home   = is_reserved_home_device(fd);
+        int vendor = is_reserved_vendor_device(fd);
+
+        const char *role = NULL;
+        if (home)
+            role = "home";
+        else if (asus)
+            role = "asus";
+        else if (vendor)
+            role = "vendor";
+
+        if (role) {
+            PLAYOS_LOG_I("input", "opened reserved %s node: '%s' (%s) fd=%d",
+                         role, name, path, fd);
+            shell_input_add_reserved_fd(s, fd, role);
+        } else {
+            PLAYOS_LOG_D("input", "skipping non-reserved node '%s' (%s)",
+                         name, path);
+            close(fd);
+        }
+    }
+
+    closedir(dir);
+
+    if (s->reserved_fd_count == 0)
+        PLAYOS_LOG_D("input", "no reserved nodes found");
+}
+
+/* One-time diagnostic: dump /proc/bus/input/devices to the persistent log so
+ * a future log-only investigation can see the full kernel input topology even
+ * without hardware access. Per-node names/phys/evbits are also logged by
+ * shell_input_dump_capabilities() below. */
+static void shell_input_dump_proc_devices(void)
+{
+    static int dumped = 0;
+    if (dumped)
+        return;
+    dumped = 1;
+
+    FILE *fp = fopen("/proc/bus/input/devices", "r");
+    if (!fp) {
+        PLAYOS_LOG_W("input", "cannot open /proc/bus/input/devices: %s",
+                     strerror(errno));
+        return;
+    }
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        PLAYOS_LOG_I("input", "proc-input: %s", line);
+    }
+
+    fclose(fp);
+}
+
+/* One-time diagnostic: dump every /dev/input/event* node's name, phys and the
+ * reserved-key bits we care about. This correlates the shell's evdev view with
+ * the kernel's dmesg input registrations and confirms exactly which node
+ * carries volume / Command Center / Armoury keys. */
+static void shell_input_dump_capabilities(void)
+{
+    static int dumped = 0;
+    if (dumped)
+        return;
+    dumped = 1;
+
+    DIR *dir = opendir("/dev/input");
+    if (!dir)
+        return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "event", 5) != 0)
+            continue;
+
+        char path[320];
+        snprintf(path, sizeof(path), "/dev/input/%s", entry->d_name);
+
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0)
+            continue;
+
+        char name[256] = {0};
+        char phys[256] = {0};
+        ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
+        ioctl(fd, EVIOCGPHYS(sizeof(phys) - 1), phys);
+
+        unsigned long key_bits[EVDEV_BITS(KEY_MAX)] = {0};
+        if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) == 0) {
+            struct {
+                const char *label;
+                unsigned int code;
+            } interesting[] = {
+                { "BTN_SOUTH",          BTN_SOUTH },
+                { "BTN_MODE",           BTN_MODE },
+                { "KEY_VOLUMEUP",       KEY_VOLUMEUP },
+                { "KEY_VOLUMEDOWN",     KEY_VOLUMEDOWN },
+                { "KEY_PROG1",          KEY_PROG1 },
+                { "KEY_PROG2",          KEY_PROG2 },
+                { "BTN_TRIGGER_HAPPY1", BTN_TRIGGER_HAPPY1 },
+                { "BTN_TRIGGER_HAPPY2", BTN_TRIGGER_HAPPY2 },
+                { "KEY_F15",            KEY_F15 },
+                { "KEY_F16",            KEY_F16 },
+                { "KEY_F17",            KEY_F17 },
+                { "KEY_F18",            KEY_F18 },
+            };
+
+            char bits[256] = {0};
+            size_t off = 0;
+            for (size_t i = 0;
+                 i < sizeof(interesting) / sizeof(interesting[0]); i++) {
+                if (TEST_BIT(interesting[i].code, key_bits)) {
+                    int n = snprintf(bits + off, sizeof(bits) - off,
+                                     "%s%s", off ? "," : "",
+                                     interesting[i].label);
+                    if (n > 0 && (size_t)n < sizeof(bits) - off)
+                        off += (size_t)n;
+                    else
+                        break;
+                }
+            }
+
+            PLAYOS_LOG_I("input",
+                         "input node %s name='%s' phys='%s' keys=[%s]",
+                         path, name, phys, off ? bits : "(none)");
         }
 
         close(fd);
     }
 
     closedir(dir);
+}
 
-    if (found_fd < 0)
-        PLAYOS_LOG_D("input", "no %s device found", label);
+/* Normalize an analog trigger raw value into [0.0, 1.0]. */
+static float
+shell_input_normalize_trigger(int value, int min, int max, int calibrated)
+{
+    if (!calibrated || max <= min) {
+        /* Unknown range: assume the common xpad-style 0..255 scale. */
+        float v = (float)value / 255.0f;
+        if (v < 0.0f) v = 0.0f;
+        if (v > 1.0f) v = 1.0f;
+        return v;
+    }
 
-    return found_fd;
+    float v = (float)(value - min) / (float)(max - min);
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    return v;
+}
+
+/* Read ABS_Z / ABS_RZ ranges from the gamepad node. Trigger axes are
+ * analog pedals, so the Live Input Test needs real min/max rather than
+ * treating them as buttons. */
+static void
+shell_input_read_trigger_calibration(struct playos_shell *s)
+{
+    s->trigger_lt_calibrated = false;
+    s->trigger_rt_calibrated = false;
+    s->trigger_lt_min = s->trigger_lt_max = 0;
+    s->trigger_rt_min = s->trigger_rt_max = 0;
+
+    if (s->evdev_fd < 0)
+        return;
+
+    struct input_absinfo absinfo;
+
+    if (ioctl(s->evdev_fd, EVIOCGABS(ABS_Z), &absinfo) == 0 &&
+        absinfo.maximum > absinfo.minimum) {
+        s->trigger_lt_min = absinfo.minimum;
+        s->trigger_lt_max = absinfo.maximum;
+        s->trigger_lt_calibrated = true;
+    }
+
+    if (ioctl(s->evdev_fd, EVIOCGABS(ABS_RZ), &absinfo) == 0 &&
+        absinfo.maximum > absinfo.minimum) {
+        s->trigger_rt_min = absinfo.minimum;
+        s->trigger_rt_max = absinfo.maximum;
+        s->trigger_rt_calibrated = true;
+    }
+
+    PLAYOS_LOG_I("input",
+                 "trigger calibration LT[%d..%d]%s RT[%d..%d]%s",
+                 s->trigger_lt_min, s->trigger_lt_max,
+                 s->trigger_lt_calibrated ? "" : " (fallback 0..255)",
+                 s->trigger_rt_min, s->trigger_rt_max,
+                 s->trigger_rt_calibrated ? "" : " (fallback 0..255)");
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int shell_input_init(struct playos_shell *s)
 {
+    shell_input_dump_proc_devices();
+    shell_input_dump_capabilities();
+
     s->evdev_fd = find_gamepad_device();
 
     /* Reserved-button nodes are best-effort: they are separate evdev
-     * streams on the ROG Ally and must not block normal input when absent. */
-    s->evdev_home_fd = find_reserved_device("home node", is_reserved_home_device);
-    s->evdev_vendor_fd = find_reserved_device("vendor node",
-                                              is_reserved_vendor_device);
+     * streams on the ROG Ally and must not block normal input when absent.
+     * Open every Asus/vendor/home node exactly once. */
+    shell_input_open_reserved_nodes(s);
+
+    s->trigger_lt_calibrated = false;
+    s->trigger_rt_calibrated = false;
+    s->trigger_lt_min = s->trigger_lt_max = 0;
+    s->trigger_rt_min = s->trigger_rt_max = 0;
+
+    s->raw_evdev_valid = false;
+    s->raw_evdev_type = 0;
+    s->raw_evdev_code = 0;
+    s->raw_evdev_value = 0;
+    s->raw_evdev_dev[0] = '\0';
 
     if (s->evdev_fd < 0) {
         PLAYOS_LOG_W("input", "no gamepad device found");
@@ -270,6 +491,8 @@ int shell_input_init(struct playos_shell *s)
     memset(&s->controller, 0, sizeof(s->controller));
     memset(&s->controller_prev, 0, sizeof(s->controller_prev));
     s->buttons_pressed = 0;
+
+    shell_input_read_trigger_calibration(s);
 
     return 0;
 }
@@ -376,10 +599,21 @@ static int shell_input_process_event(struct playos_shell *s,
         case BTN_MODE:
         case KEY_PROG1:
         case BTN_TRIGGER_HAPPY1:
+        case KEY_F17:  /* ROG Ally Armoury Crate (long-press, hid-asus) */
             input_apply_button(s, PLAYOS_BUTTON_SYSTEM, ev->value);
+            break;
+        case KEY_F18:  /* ROG Ally Armoury Crate long-press release marker */
+            /* hid-asus emits F18 on release of the long-press. Treat any
+             * non-zero F18 as the SYSTEM release so the button does not
+             * stick. */
+            if (ev->value) {
+                s->controller.buttons &= ~PLAYOS_BUTTON_SYSTEM;
+                s->buttons_pressed &= ~PLAYOS_BUTTON_SYSTEM;
+            }
             break;
 
         /* ── Reserved: QUICK_MENU (Command Center / meta keys) ── */
+        case KEY_F16:  /* ROG Ally Command Center (QAM, hid-asus) */
         case KEY_PROG2:
         case BTN_TRIGGER_HAPPY2:
         case KEY_LEFTMETA:
@@ -389,10 +623,12 @@ static int shell_input_process_event(struct playos_shell *s,
 
         /* ── Hardware volume keys (vendor node) ── */
         case KEY_VOLUMEUP:
+            s->volume_up_held = (ev->value != 0);
             if (ev->value)
                 shell_input_volume_adjust(s, 0.05f);
             break;
         case KEY_VOLUMEDOWN:
+            s->volume_down_held = (ev->value != 0);
             if (ev->value)
                 shell_input_volume_adjust(s, -0.05f);
             break;
@@ -400,9 +636,24 @@ static int shell_input_process_event(struct playos_shell *s,
         break;
 
     case EV_ABS:
+        /* Analog triggers are pedals, not buttons. ABS_Z is left trigger
+         * and ABS_RZ is right trigger on the ROG Ally / xpad mapping. */
+        if (ev->code == ABS_Z) {
+            s->controller.axes[PLAYOS_AXIS_LEFT_TRIGGER] =
+                shell_input_normalize_trigger(ev->value,
+                                              s->trigger_lt_min,
+                                              s->trigger_lt_max,
+                                              s->trigger_lt_calibrated);
+        } else if (ev->code == ABS_RZ) {
+            s->controller.axes[PLAYOS_AXIS_RIGHT_TRIGGER] =
+                shell_input_normalize_trigger(ev->value,
+                                              s->trigger_rt_min,
+                                              s->trigger_rt_max,
+                                              s->trigger_rt_calibrated);
+        }
         /* D-pad as ABS_HAT (xpad driver).
          * Mutually exclusive: LEFT clears RIGHT, UP clears DOWN. */
-        if (ev->code == ABS_HAT0X) {
+        else if (ev->code == ABS_HAT0X) {
             s->controller.buttons &= ~(PLAYOS_BUTTON_DPAD_LEFT |
                                        PLAYOS_BUTTON_DPAD_RIGHT);
             if (ev->value < 0)
@@ -426,13 +677,44 @@ static int shell_input_process_event(struct playos_shell *s,
     return 0;
 }
 
-static void shell_input_drain_fd(struct playos_shell *s, int fd)
+static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *name)
 {
     if (fd < 0)
         return;
 
+    /* Raw-code diagnostics for the reserved nodes only. The ROG Ally's
+     * Command Center / Armoury Crate buttons arrive as KEY_F16/F17/F18
+     * rather than the PROG / TRIGGER_HAPPY codes the original discovery
+     * expected, so tracing raw codes is how we confirm the mapping. Every
+     * reserved node (home/asus/vendor) is logged; the gamepad is excluded
+     * because sticks/triggers would flood the log with EV_ABS spam. */
+    int raw_log = (name && name[0] && strcmp(name, "gamepad") != 0);
+
     struct input_event ev;
     while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) {
+        if (raw_log && ev.type == EV_KEY) {
+            PLAYOS_LOG_D("input", "%s raw EV_KEY code=0x%x value=%d",
+                         name, ev.code, ev.value);
+        }
+
+        /* Keep the latest non-SYN, non-zero event so the Live Input Test can
+         * show the raw evdev code for ANY monitored input, not just decoded
+         * gamepad buttons (covers volume keys, reserved keys, sticks,
+         * triggers). Ignoring release (value == 0) keeps quick taps visible
+         * on screen instead of being overwritten by the release next frame. */
+        if (ev.type != EV_SYN && ev.value != 0) {
+            s->raw_evdev_type = ev.type;
+            s->raw_evdev_code = ev.code;
+            s->raw_evdev_value = ev.value;
+            if (name && name[0]) {
+                snprintf(s->raw_evdev_dev, sizeof(s->raw_evdev_dev), "%s",
+                         name);
+            } else {
+                s->raw_evdev_dev[0] = '\0';
+            }
+            s->raw_evdev_valid = true;
+        }
+
         if (shell_input_process_event(s, &ev))
             break; /* Process one kernel frame per poll */
     }
@@ -466,6 +748,7 @@ void shell_input_poll(struct playos_shell *s)
             if (s->evdev_fd >= 0) {
                 PLAYOS_LOG_I("input", "gamepad appeared after retry (fd=%d)",
                              s->evdev_fd);
+                shell_input_read_trigger_calibration(s);
             } else {
                 retry_count++;
                 /* First failure and every 15th (~30s) are worth logging. */
@@ -486,12 +769,14 @@ void shell_input_poll(struct playos_shell *s)
      * session; if it ever becomes a requirement, switch to inotify-based
      * discovery instead of polling. */
 
-    if (s->evdev_fd < 0 && s->evdev_home_fd < 0 && s->evdev_vendor_fd < 0)
+    if (s->evdev_fd < 0 && s->reserved_fd_count == 0)
         return;
 
-    shell_input_drain_fd(s, s->evdev_fd);
-    shell_input_drain_fd(s, s->evdev_home_fd);
-    shell_input_drain_fd(s, s->evdev_vendor_fd);
+    shell_input_drain_fd(s, s->evdev_fd, "gamepad");
+    for (int i = 0; i < s->reserved_fd_count; i++) {
+        shell_input_drain_fd(s, s->reserved_fds[i].fd,
+                             s->reserved_fds[i].name);
+    }
 }
 
 int shell_input_button_pressed(const struct playos_shell *s,

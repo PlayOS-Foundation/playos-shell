@@ -208,7 +208,7 @@ shell_status_bar_draw(struct playos_shell *s)
     float bar_h = (float)h * 0.06f;
     if (bar_h < 24.0f)
         bar_h = 24.0f;
-    float scale = bar_h / 24.0f;
+    float scale = bar_h / 24.0f * s->dpi_scale;
     float y = (float)h - bar_h;
 
     render_draw_rect(0.0f, y, (float)w, bar_h, 0.0f, 0.0f, 0.0f, 0.55f);
@@ -287,6 +287,53 @@ shell_switch_screen(struct playos_shell *s, enum playos_screen screen)
     }
 }
 
+/* Case-insensitive substring check for the DPI detection below. Only the
+ * lowercase needles we pass are used, so matching the uppercase counterpart
+ * is sufficient. */
+static int
+shell_str_contains_nocase(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle)
+        return 0;
+
+    size_t nlen = strlen(needle);
+    if (nlen == 0)
+        return 1;
+
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+        while (i < nlen && p[i]) {
+            char c = p[i];
+            char n = needle[i];
+            if (c != n && c != n - ('a' - 'A'))
+                break;
+            i++;
+        }
+        if (i == nlen)
+            return 1;
+    }
+
+    return 0;
+}
+
+/* Detect a coarse UI scale from the device model. The custom Wayland backend
+ * cannot report physical monitor size, so we special-case the ROG Ally's
+ * 7" 1080p (~314 PPI) panel: without a DPI correction every screen's
+ * height-derived text scale is physically tiny. */
+static float
+shell_detect_dpi_scale(void)
+{
+    const char *model = playos_system_device_model();
+    if (!model || !model[0])
+        return 1.0f;
+
+    if (shell_str_contains_nocase(model, "rog") ||
+        shell_str_contains_nocase(model, "ally"))
+        return 2.0f;
+
+    return 1.0f;
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 int
@@ -304,10 +351,9 @@ main(int argc, char *argv[])
     s->current_screen = SCREEN_HOME;
     s->output_width = 1920;
     s->output_height = 1080;
-    s->dpi_scale = 1.0f;
+    s->dpi_scale = shell_detect_dpi_scale();
     s->evdev_fd = -1;
-    s->evdev_home_fd = -1;
-    s->evdev_vendor_fd = -1;
+    s->reserved_fd_count = 0;
 
     /* Persistent async-event listener (Sprint 7). Opened by
      * playos_trusted_register_shell() once trusted IPC is up; polled in
@@ -344,6 +390,9 @@ main(int argc, char *argv[])
     s->configured = true;
     PLAYOS_LOG_I("shell", "window ready: %dx%d",
                  s->output_width, s->output_height);
+
+    /* ── UI font (Sprint 9) ── */
+    render_font_init();
 
     /* ── UI sounds (Sprint 8) ── */
     shell_audio_init();
@@ -530,10 +579,10 @@ main(int argc, char *argv[])
 
     if (s->evdev_fd >= 0)
         close(s->evdev_fd);
-    if (s->evdev_home_fd >= 0)
-        close(s->evdev_home_fd);
-    if (s->evdev_vendor_fd >= 0)
-        close(s->evdev_vendor_fd);
+    for (int i = 0; i < s->reserved_fd_count; i++) {
+        if (s->reserved_fds[i].fd >= 0)
+            close(s->reserved_fds[i].fd);
+    }
 
 #ifdef PLAYOS_TRUSTED_IPC
     if (shell_listener_fd >= 0)

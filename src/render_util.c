@@ -11,8 +11,14 @@
 
 #include "shell.h"
 #include "raylib.h"
+#include "playos/playos_logging.h"
 
 #include <stddef.h>
+
+/* Single UI font shared by every text draw (Sprint 9). Loaded from a TTF at
+ * startup; on any failure we keep texture.id == 0 and the helpers fall back
+ * to Raylib's built-in default font, so text can never disappear. */
+static Font s_ui_font = { 0 };
 
 /* Convert the shell's normalized RGBA (0.0–1.0) convention to a raylib Color */
 static Color
@@ -81,8 +87,9 @@ render_draw_text(const char *text, float x, float y,
      * spacing = scale keeps line height and centering proportional. */
     float fontSize = scale * 7.0f;
     float spacing  = scale;
+    Font font = s_ui_font.texture.id ? s_ui_font : GetFontDefault();
 
-    DrawTextEx(GetFontDefault(), text, (Vector2){ x, y },
+    DrawTextEx(font, text, (Vector2){ x, y },
                fontSize, spacing, color_from_rgba(r, g, b, a));
 }
 
@@ -98,7 +105,31 @@ render_text_width(const char *text, float scale)
 {
     if (!text) return 0.0f;
 
-    Vector2 size = MeasureTextEx(GetFontDefault(), text,
-                                 scale * 7.0f, scale);
+    Font font = s_ui_font.texture.id ? s_ui_font : GetFontDefault();
+    Vector2 size = MeasureTextEx(font, text, scale * 7.0f, scale);
     return size.x;
+}
+
+void
+render_font_init(void)
+{
+    /* Resolved relative to the CWD when run from the repo tree, and via the
+     * absolute install path on the Ally image. First hit wins; otherwise
+     * Raylib's default font remains in effect. */
+    static const char *candidates[] = {
+        "/usr/share/playos-shell/assets/Silkscreen-Regular.ttf",
+        "assets/Silkscreen-Regular.ttf",
+        "Silkscreen-Regular.ttf",
+    };
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        if (FileExists(candidates[i])) {
+            s_ui_font = LoadFontEx(candidates[i], 32, NULL, 95);
+            PLAYOS_LOG_I("shell", "loaded UI font: %s",
+                         candidates[i]);
+            return;
+        }
+    }
+
+    PLAYOS_LOG_W("shell", "UI font not found — using raylib default");
 }
