@@ -343,14 +343,20 @@ library_load_icons(struct playos_shell *s, const char *games_path)
     }
 }
 
-/* ── Grid layout constants ─────────────────────────────────────────────── */
+/* ── Grid layout ──────────────────────────────────────────────────────── */
 
-#define GRID_COLS       4
+#define GRID_COLS       3
 #define GRID_ROWS       4
-#define CARD_PADDING    16
-#define CARD_WIDTH      280
-#define CARD_HEIGHT     200
-#define GRID_TOP_MARGIN 180
+
+/* Card geometry is derived from the output surface at draw time rather than
+ * hardcoded pixels, so the grid stays usable on both the 1080p host and the
+ * ROG Ally's 7" panel (dpi_scale == 2.0). Fewer, wider cards leave room for
+ * a larger title font without overflowing. */
+#define GRID_SIDE_MARGIN_FRAC  0.06f
+#define GRID_TOP_FRAC          0.15f
+#define GRID_BOTTOM_FRAC       0.18f
+#define GRID_GAP_X_FRAC        0.02f
+#define GRID_GAP_Y_FRAC        0.015f
 
 /* ── Enter: scan games directory ──────────────────────────────────────── */
 
@@ -473,11 +479,8 @@ screen_library_update(struct playos_shell *s)
 
 static void
 draw_game_card(struct playos_shell *s, int index,
-               float x, float y, int is_selected)
+               float x, float y, float card_w, float card_h, int is_selected)
 {
-    float card_w = (float)CARD_WIDTH;
-    float card_h = (float)CARD_HEIGHT;
-
     /* Card background */
     if (is_selected) {
         /* Selected highlight */
@@ -489,10 +492,12 @@ draw_game_card(struct playos_shell *s, int index,
     render_draw_rect(x, y, card_w, card_h,
                      0.12f, 0.20f, 0.35f, 1.0f);
 
-    /* Icon (top-center) */
-    float icon_size = 80.0f;
+    /* Icon (top-center), sized from the card so it stays proportional. */
+    float icon_size = card_h * 0.42f;
+    if (icon_size > card_w * 0.5f)
+        icon_size = card_w * 0.5f;
     float icon_x = x + (card_w - icon_size) * 0.5f;
-    float icon_y = y + 12.0f;
+    float icon_y = y + card_h * 0.08f;
 
     if (s->game_has_icon[index] && s_game_icons_loaded[index]) {
         Texture2D *tex = &s_game_icons[index];
@@ -505,32 +510,35 @@ draw_game_card(struct playos_shell *s, int index,
                          0.15f, 0.25f, 0.40f, 1.0f);
 
         /* "?" in placeholder */
-        float q_scale = 4.0f;
+        float q_scale = icon_size / 14.0f;
         const char *q = "?";
         float q_w = render_text_width(q, q_scale);
         render_draw_text(q,
                          icon_x + (icon_size - q_w) * 0.5f,
-                         icon_y + icon_size * 0.35f,
+                         icon_y + icon_size * 0.30f,
                          q_scale, 0.5f, 0.5f, 0.5f, 1.0f);
     }
 
-    /* Game title (use display name from manifest, fallback to game ID) */
+    /* Game title (use display name from manifest, fallback to game ID).
+     * Scaled from the screen header so it never looks tiny next to it;
+     * long names shrink only as much as needed to fit the card. */
     const char *display_name = s->game_names[index];
     if (!display_name[0])
         display_name = s->game_ids[index];
-    float title_scale = 2.2f;
+
+    float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
+    float title_scale = header_scale * 0.55f;
     float title_w = render_text_width(display_name, title_scale);
-    float title_max_w = card_w - 16.0f;
+    float title_max_w = card_w - card_w * 0.08f;
 
     if (title_w > title_max_w) {
-        /* Truncate with "..." — simple approach: reduce scale */
         title_scale *= title_max_w / title_w;
         title_w = render_text_width(display_name, title_scale);
     }
 
     render_draw_text(display_name,
                      x + (card_w - title_w) * 0.5f,
-                     icon_y + icon_size + 12.0f,
+                     icon_y + icon_size + card_h * 0.06f,
                      title_scale,
                      is_selected ? 1.0f : 0.8f,
                      is_selected ? 1.0f : 0.8f,
@@ -582,19 +590,25 @@ screen_library_draw(struct playos_shell *s)
 
     /* ── Game grid ── */
     if (s->game_count > 0) {
-        /* Center the grid horizontally */
-        float grid_total_w = (float)(GRID_COLS * CARD_WIDTH +
-                                     (GRID_COLS - 1) * CARD_PADDING);
-        float grid_start_x = ((float)w - grid_total_w) * 0.5f;
+        float side   = (float)w * GRID_SIDE_MARGIN_FRAC;
+        float top    = (float)h * GRID_TOP_FRAC;
+        float bottom = (float)h * GRID_BOTTOM_FRAC;
+        float gap_x  = (float)w * GRID_GAP_X_FRAC;
+        float gap_y  = (float)h * GRID_GAP_Y_FRAC;
+
+        float avail_w = (float)w - 2.0f * side;
+        float avail_h = (float)h - top - bottom;
+        float card_w  = (avail_w - (float)(GRID_COLS - 1) * gap_x) / (float)GRID_COLS;
+        float card_h  = (avail_h - (float)(GRID_ROWS - 1) * gap_y) / (float)GRID_ROWS;
 
         for (int i = 0; i < s->game_count; i++) {
             int col = i % GRID_COLS;
             int row = i / GRID_COLS;
-            float cx = grid_start_x + (float)col * (float)(CARD_WIDTH + CARD_PADDING);
-            float cy = (float)GRID_TOP_MARGIN +
-                       (float)row * (float)(CARD_HEIGHT + CARD_PADDING);
+            float cx = side + (float)col * (card_w + gap_x);
+            float cy = top + (float)row * (card_h + gap_y);
 
-            draw_game_card(s, i, cx, cy, i == s->selected_game_index);
+            draw_game_card(s, i, cx, cy, card_w, card_h,
+                           i == s->selected_game_index);
         }
     }
 
