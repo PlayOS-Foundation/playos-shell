@@ -345,13 +345,14 @@ library_load_icons(struct playos_shell *s, const char *games_path)
 
 /* ── Grid layout ──────────────────────────────────────────────────────── */
 
-#define GRID_COLS       3
-#define GRID_ROWS       4
+#define GRID_COLS       5
+#define GRID_ROWS       2
+#define SLOTS_PER_PAGE  (GRID_COLS * GRID_ROWS)
 
 /* Card geometry is derived from the output surface at draw time rather than
  * hardcoded pixels, so the grid stays usable on both the 1080p host and the
- * ROG Ally's 7" panel (dpi_scale == 2.0). Fewer, wider cards leave room for
- * a larger title font without overflowing. */
+ * ROG Ally's 7" panel (dpi_scale == 2.0). The 5x2 grid holds ~1" square cards
+ * (target ~300px at 1080p) and paginates when more games are installed. */
 #define GRID_SIDE_MARGIN_FRAC  0.06f
 #define GRID_TOP_FRAC          0.15f
 #define GRID_BOTTOM_FRAC       0.18f
@@ -437,18 +438,45 @@ screen_library_update(struct playos_shell *s)
         return;
     }
 
-    int col = s->selected_game_index % GRID_COLS;
-    int row = s->selected_game_index / GRID_COLS;
+    int page       = s->selected_game_index / SLOTS_PER_PAGE;
+    int page_start = page * SLOTS_PER_PAGE;
+    int page_count = (s->game_count + SLOTS_PER_PAGE - 1) / SLOTS_PER_PAGE;
+    int last_page  = page_count - 1;
+    int on_page    = s->selected_game_index - page_start;
+    int col        = on_page % GRID_COLS;
+    int row        = on_page / GRID_COLS;
 
-    /* D-pad navigation */
+    /* L1/R1: flip pages */
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_L1)) {
+        if (page > 0)
+            s->selected_game_index = (page - 1) * SLOTS_PER_PAGE;
+    }
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_R1)) {
+        if (page < last_page) {
+            int idx = (page + 1) * SLOTS_PER_PAGE;
+            if (idx >= s->game_count)
+                idx = s->game_count - 1;
+            s->selected_game_index = idx;
+        }
+    }
+
+    /* D-pad navigation; moving past a page edge wraps to the next page. */
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
         if (col > 0)
             s->selected_game_index--;
+        else if (page > 0)
+            s->selected_game_index = page_start - 1;
     }
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT)) {
         if (col < GRID_COLS - 1 &&
             s->selected_game_index + 1 < s->game_count)
             s->selected_game_index++;
+        else if (page < last_page) {
+            int idx = page_start + SLOTS_PER_PAGE;
+            if (idx >= s->game_count)
+                idx = s->game_count - 1;
+            s->selected_game_index = idx;
+        }
     }
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
         if (row > 0)
@@ -527,7 +555,7 @@ draw_game_card(struct playos_shell *s, int index,
         display_name = s->game_ids[index];
 
     float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
-    float title_scale = header_scale * 0.55f;
+    float title_scale = header_scale * 0.65f;
     float title_w = render_text_width(display_name, title_scale);
     float title_max_w = card_w - card_w * 0.08f;
 
@@ -590,6 +618,12 @@ screen_library_draw(struct playos_shell *s)
 
     /* ── Game grid ── */
     if (s->game_count > 0) {
+        int page       = s->selected_game_index / SLOTS_PER_PAGE;
+        int page_start = page * SLOTS_PER_PAGE;
+        int page_end   = page_start + SLOTS_PER_PAGE;
+        if (page_end > s->game_count)
+            page_end = s->game_count;
+
         float side   = (float)w * GRID_SIDE_MARGIN_FRAC;
         float top    = (float)h * GRID_TOP_FRAC;
         float bottom = (float)h * GRID_BOTTOM_FRAC;
@@ -598,23 +632,41 @@ screen_library_draw(struct playos_shell *s)
 
         float avail_w = (float)w - 2.0f * side;
         float avail_h = (float)h - top - bottom;
-        float card_w  = (avail_w - (float)(GRID_COLS - 1) * gap_x) / (float)GRID_COLS;
-        float card_h  = (avail_h - (float)(GRID_ROWS - 1) * gap_y) / (float)GRID_ROWS;
 
-        for (int i = 0; i < s->game_count; i++) {
-            int col = i % GRID_COLS;
-            int row = i / GRID_COLS;
-            float cx = side + (float)col * (card_w + gap_x);
-            float cy = top + (float)row * (card_h + gap_y);
+        float cell_w = (avail_w - (float)(GRID_COLS - 1) * gap_x) / (float)GRID_COLS;
+        float cell_h = (avail_h - (float)(GRID_ROWS - 1) * gap_y) / (float)GRID_ROWS;
+        float card   = (cell_w < cell_h) ? cell_w : cell_h; /* square cards */
 
-            draw_game_card(s, i, cx, cy, card_w, card_h,
+        /* Center the whole (smaller) grid block inside the reserved area. */
+        float grid_w = (float)GRID_COLS * card + (float)(GRID_COLS - 1) * gap_x;
+        float grid_h = (float)GRID_ROWS * card + (float)(GRID_ROWS - 1) * gap_y;
+        float grid_x = side + (avail_w - grid_w) * 0.5f;
+        float grid_y = top + (avail_h - grid_h) * 0.5f;
+
+        for (int i = page_start; i < page_end; i++) {
+            int on_page = i - page_start;
+            int col = on_page % GRID_COLS;
+            int row = on_page / GRID_COLS;
+            float cx = grid_x + (float)col * (card + gap_x);
+            float cy = grid_y + (float)row * (card + gap_y);
+
+            draw_game_card(s, i, cx, cy, card, card,
                            i == s->selected_game_index);
         }
     }
 
     /* ── Navigation hints ── */
     float hint_scale = header_scale * 0.45f;
-    const char *hints = "[A] Select    [B] Back    [D-Pad] Navigate";
+    char hints[128];
+    if (s->game_count > 0) {
+        int page       = s->selected_game_index / SLOTS_PER_PAGE;
+        int page_count = (s->game_count + SLOTS_PER_PAGE - 1) / SLOTS_PER_PAGE;
+        snprintf(hints, sizeof(hints),
+                 "Page %d/%d    [L1/R1] Page    [D-Pad] Navigate    [A] Select    [B] Back",
+                 page + 1, page_count);
+    } else {
+        snprintf(hints, sizeof(hints), "[B] Back");
+    }
     float hints_w = render_text_width(hints, hint_scale);
     render_draw_text(hints, ((float)w - hints_w) * 0.5f,
                      (float)h - hint_scale * 45.0f,
