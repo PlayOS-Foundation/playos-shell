@@ -173,8 +173,8 @@ screen_home_draw(struct playos_shell *s)
 
     /* FPS counter (top-right, small) */
     char fps_text[32];
-    snprintf(fps_text, sizeof(fps_text), "%.0f ms",
-             s->frame_time * 1000.0);
+    float fps = (s->frame_time > 0.0f) ? (1.0f / s->frame_time) : 0.0f;
+    snprintf(fps_text, sizeof(fps_text), "%.0f FPS", fps);
     float fps_scale = footer_scale * 0.8f;
     float fps_w = render_text_width(fps_text, fps_scale);
     render_draw_text(fps_text, (float)w - fps_w - 16.0f, 8.0f,

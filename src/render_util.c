@@ -65,6 +65,20 @@ render_draw_triangle(float x1, float y1, float x2, float y2,
 }
 
 void
+render_draw_circle(float cx, float cy, float radius,
+                   float r, float g, float b, float a)
+{
+    DrawCircleV((Vector2){ cx, cy }, radius, color_from_rgba(r, g, b, a));
+}
+
+void
+render_draw_circle_lines(float cx, float cy, float radius,
+                         float r, float g, float b, float a)
+{
+    DrawCircleLinesV((Vector2){ cx, cy }, radius, color_from_rgba(r, g, b, a));
+}
+
+void
 render_begin_scissor(int x, int y, int w, int h)
 {
     BeginScissorMode(x, y, w, h);

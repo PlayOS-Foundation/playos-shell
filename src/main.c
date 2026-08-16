@@ -144,6 +144,16 @@ shell_audio_shutdown(void)
     CloseAudioDevice();
 }
 
+/* ── Analog sticks/triggers (Sprint 12 responsiveness fix) ─────────────
+ * Sticks and triggers are decoded directly from evdev in
+ * shell_input_poll() (src/input.c), on the same fresh frame as the face
+ * buttons. Reading them through Raylib here introduced a one-frame lag,
+ * because Raylib refreshes its gamepad snapshot in EndDrawing() — after the
+ * shell has already polled this frame. Keeping the whole shell on the
+ * trusted evdev path also removes the 5%/10% deadzone split: evdev uses the
+ * same fixed 5% deadzone as the platform API (see SHELL_STICK_DEADZONE in
+ * src/input.c). */
+
 /* ── Signal handler ──────────────────────────────────────────────────── */
 
 static void
@@ -391,6 +401,11 @@ main(int argc, char *argv[])
     PLAYOS_LOG_I("shell", "window ready: %dx%d",
                  s->output_width, s->output_height);
 
+    /* Cap the render loop at 60 FPS. raylib's EndDrawing() already performs
+     * the frame-time wait via CORE.Time.target, so this gives the shell a
+     * stable, consistent cadence instead of spinning unthrottled. */
+    SetTargetFPS(60);
+
     /* ── UI font (Sprint 9) ── */
     render_font_init();
 
@@ -450,7 +465,8 @@ main(int argc, char *argv[])
         struct timespec frame_start;
         clock_gettime(CLOCK_MONOTONIC, &frame_start);
 
-        /* Input — direct evdev, all buttons decoded in shell_input_poll() */
+        /* Input — direct evdev, buttons AND analog axes decoded in
+         * shell_input_poll() on one fresh frame (no Raylib one-frame lag). */
         shell_input_poll(s);
 
         /* One-time audio bootstrap: unmute + default volume once the mixer

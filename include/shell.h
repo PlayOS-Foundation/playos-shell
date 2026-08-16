@@ -52,6 +52,8 @@ struct playos_shell {
 
     /* ── Input (evdev — trusted, keeps SYSTEM/QUICK_MENU) ── */
     int  evdev_fd;             /* Main gamepad node (face buttons, sticks) */
+    int  input_inotify_fd;     /* inotify watch on /dev/input (hotplug) */
+    int  input_inotify_wd;     /* watch descriptor for /dev/input */
     struct shell_reserved_fd reserved_fds[SHELL_MAX_RESERVED_FDS];
     int  reserved_fd_count;    /* Number of valid entries in reserved_fds[] */
     PlayOSControllerState controller;
@@ -62,12 +64,22 @@ struct playos_shell {
                                                state diff would otherwise drop. */
     bool   volume_up_held;       /* vendor KEY_VOLUMEUP currently held */
     bool   volume_down_held;     /* vendor KEY_VOLUMEDOWN currently held */
+    bool   rear_macro_held;      /* ROG Ally rear macro M1/M2 (KEY_CUT, shared) */
 
     /* ── Analog trigger calibration (evdev ABS_Z / ABS_RZ) ── */
     int    trigger_lt_min, trigger_lt_max;   /* Left trigger raw range */
     int    trigger_rt_min, trigger_rt_max;   /* Right trigger raw range */
     bool   trigger_lt_calibrated;
     bool   trigger_rt_calibrated;
+
+    /* ── Analog stick calibration (evdev ABS_X/Y/RX/RY) ──
+     * Indexed directly by PLAYOS_AXIS_LEFT_X..PLAYOS_AXIS_RIGHT_Y (0..3). */
+    struct {
+        int  min;
+        int  max;
+        int  flat;         /* evdev deadzone, in raw units */
+        bool calibrated;
+    } stick_cal[4];
 
     /* ── Raw evdev diagnostic (Live Input Test) ── */
     uint16_t raw_evdev_type;      /* Latest non-SYN event type */
@@ -157,6 +169,10 @@ void render_draw_rect(float x, float y, float w, float h,
 void render_draw_triangle(float x1, float y1, float x2, float y2,
                           float x3, float y3,
                           float r, float g, float b, float a);
+void render_draw_circle(float cx, float cy, float radius,
+                        float r, float g, float b, float a);
+void render_draw_circle_lines(float cx, float cy, float radius,
+                              float r, float g, float b, float a);
 void render_begin_scissor(int x, int y, int w, int h);
 void render_end_scissor(void);
 void render_draw_text(const char *text, float x, float y,

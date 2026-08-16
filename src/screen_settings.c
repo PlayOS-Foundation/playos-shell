@@ -117,9 +117,9 @@ settings_content_height(const struct playos_shell *s, int tab)
     case TAB_NETWORK:
         return 4.0f * info_h;
     case TAB_INPUT:
-        /* Title + raw evdev row + pill rows + volume row + two trigger gauge
-         * rows + mask row. */
-        return 14.0f * info_h;
+        /* Title + raw evdev row + pill rows + volume row + two trigger rows
+         * + enlarged side-by-side stick row + mask row. */
+        return 16.0f * info_h;
     default:
         return 0.0f;
     }
@@ -382,6 +382,32 @@ draw_trigger_gauge(float x, float y, float w, float h, float value)
     }
 }
 
+/* Analog stick indicator: a ring with a moving dot. The dot follows the
+ * stick's normalized X/Y position; screen Y grows down while PlayOS reports
+ * up as negative, so the signs align directly. The label is centered just
+ * above the ring. */
+static void
+draw_stick_indicator(const char *label, float cx, float cy,
+                     float radius, float x, float y, float scale)
+{
+    render_draw_circle_lines(cx, cy, radius, 0.50f, 0.50f, 0.55f, 0.9f);
+    render_draw_circle_lines(cx, cy, radius * 0.5f,
+                             0.50f, 0.50f, 0.55f, 0.35f);
+
+    float travel = radius * 0.8f;
+    float dot_x = cx + clampf(x, -1.0f, 1.0f) * travel;
+    float dot_y = cy + clampf(y, -1.0f, 1.0f) * travel;
+    render_draw_circle(dot_x, dot_y, radius * 0.28f,
+                       0.84f, 0.42f, 0.0f, 0.95f);
+
+    if (label) {
+        float label_w = render_text_width(label, scale);
+        render_draw_text(label, cx - label_w * 0.5f,
+                         cy - radius - scale * 2.0f, scale,
+                         0.9f, 0.9f, 0.9f, 1.0f);
+    }
+}
+
 /* Live view of every button the shell can see, including the reserved
  * SYSTEM/QUICK_MENU buttons and hardware volume keys. This is a diagnostic
  * widget only; game processes still never receive the reserved buttons. */
@@ -415,8 +441,6 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     const float gap = scale * 2.0f;
     const size_t pill_count = sizeof(pills) / sizeof(pills[0]);
 
-    render_draw_text("Live Input Test", x, *y, scale,
-                     0.9f, 0.9f, 0.9f, 1.0f);
     *y += row_h;
 
     /* Raw evdev code of the most recent event from any monitored node
@@ -480,12 +504,20 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     /* Hardware volume keys arrive on their own Asus Keyboard node, so they
      * are tracked separately from the PlayOS controller button mask. */
     *y += row_h;
-    draw_input_pill(x, *y, "VOL+", s->volume_up_held, scale);
-    draw_input_pill(x + input_pill_width("VOL+", scale) + gap, *y,
-                    "VOL-", s->volume_down_held, scale);
+    float vol_cursor_x = x;
+    draw_input_pill(vol_cursor_x, *y, "VOL+", s->volume_up_held, scale);
+    vol_cursor_x += input_pill_width("VOL+", scale) + gap;
+    draw_input_pill(vol_cursor_x, *y, "VOL-", s->volume_down_held, scale);
+    vol_cursor_x += input_pill_width("VOL-", scale) + gap;
+    draw_input_pill(vol_cursor_x, *y, "M1/M2", s->rear_macro_held, scale);
 
-    /* Analog triggers (LT/RT) arrive as ABS_Z / ABS_RZ axes, not as button
-     * bits, so they are drawn as pedal gauges instead of pills. */
+    /* Analog triggers (LT/RT, ABS_Z/ABS_RZ) get full-width pedal gauges.
+     * Analog sticks (LS/RS, ABS_X/Y/RX/RY) get their own dedicated row with
+     * two large side-by-side indicators below the triggers. */
+    float content_w = (float)s->output_width - 2.0f * x;
+    if (content_w < scale * 20.0f)
+        content_w = scale * 20.0f;
+
     float trigger_label_x = x;
     float trigger_gauge_x = x + scale * 10.0f;
     float trigger_value_x = (float)s->output_width - x;
@@ -494,9 +526,10 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
         trigger_gauge_w = scale * 10.0f;
     float trigger_gauge_h = scale * 5.0f;
 
+    char tbuf[32];
+
     *y += row_h;
     float lt = s->controller.axes[PLAYOS_AXIS_LEFT_TRIGGER];
-    char tbuf[32];
     render_draw_text("LT", trigger_label_x, *y, scale,
                      0.9f, 0.9f, 0.9f, 1.0f);
     draw_trigger_gauge(trigger_gauge_x, *y, trigger_gauge_w, trigger_gauge_h,
@@ -515,6 +548,23 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     render_draw_text(tbuf, trigger_value_x - render_text_width(tbuf, scale),
                      *y, scale, 0.9f, 0.9f, 0.9f, 1.0f);
     *y += row_h;
+
+    /* Two large stick indicators, side by side. */
+    float stick_radius = scale * 10.0f;
+    float stick_row_h = stick_radius * 2.0f + scale * 10.0f;
+    float stick_cy = *y + stick_row_h * 0.5f;
+    float ls_cx = x + content_w * 0.25f;
+    float rs_cx = x + content_w * 0.75f;
+
+    draw_stick_indicator("LS", ls_cx, stick_cy, stick_radius,
+                         s->controller.axes[PLAYOS_AXIS_LEFT_X],
+                         s->controller.axes[PLAYOS_AXIS_LEFT_Y],
+                         scale);
+    draw_stick_indicator("RS", rs_cx, stick_cy, stick_radius,
+                         s->controller.axes[PLAYOS_AXIS_RIGHT_X],
+                         s->controller.axes[PLAYOS_AXIS_RIGHT_Y],
+                         scale);
+    *y += stick_row_h;
 
     char buf[48];
     snprintf(buf, sizeof(buf), "0x%08X", (unsigned)s->controller.buttons);

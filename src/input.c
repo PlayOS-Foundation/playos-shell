@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -444,6 +445,46 @@ shell_input_normalize_trigger(int value, int min, int max, int calibrated)
     return v;
 }
 
+/* Single source of truth for the shell's stick deadzone. Matches the
+ * platform API backend (backend_evdev.c normalize_stick) so the shell and
+ * games agree on where the center deadzone begins. No post-deadzone
+ * rescale: the value snaps to 0 inside the band and is passed through
+ * unchanged outside it, which keeps movement predictable in the Live Input
+ * Test. */
+#define SHELL_STICK_DEADZONE 0.05f
+
+/* Normalize an analog stick raw value into [-1.0, 1.0].
+ * Center is the midpoint of the calibrated range; Y up is negative (the
+ * PlayOS convention). The dead zone is the fixed SHELL_STICK_DEADZONE. */
+static float
+shell_input_normalize_stick(const struct playos_shell *s, int axis, int value)
+{
+    int min, max;
+
+    if (axis >= 0 && axis < 4 && s->stick_cal[axis].calibrated) {
+        min = s->stick_cal[axis].min;
+        max = s->stick_cal[axis].max;
+    } else {
+        /* Unknown range: assume the common xpad-style -32768..32767 scale. */
+        min = -32768;
+        max = 32767;
+    }
+
+    float center = (float)(min + max) * 0.5f;
+    float half   = (float)(max - min) * 0.5f;
+    if (half <= 0.0f)
+        return 0.0f;
+
+    float v = ((float)value - center) / half;
+    if (v < -1.0f) v = -1.0f;
+    if (v > 1.0f) v = 1.0f;
+
+    if (v > -SHELL_STICK_DEADZONE && v < SHELL_STICK_DEADZONE)
+        return 0.0f;
+
+    return v;
+}
+
 /* Read ABS_Z / ABS_RZ ranges from the gamepad node. Trigger axes are
  * analog pedals, so the Live Input Test needs real min/max rather than
  * treating them as buttons. */
@@ -482,12 +523,79 @@ shell_input_read_trigger_calibration(struct playos_shell *s)
                  s->trigger_rt_calibrated ? "" : " (fallback 0..255)");
 }
 
+/* Read ABS_X/Y/RX/RY ranges from the gamepad node. The Live Input Test
+ * visualizes the sticks, so it needs the real min/max rather than assuming
+ * the xpad-style -32768..32767 scale. flat is still captured and logged for
+ * diagnostics, but normalization uses a fixed 5% dead zone (see
+ * shell_input_normalize_stick). */
+static void
+shell_input_read_stick_calibration(struct playos_shell *s)
+{
+    static const struct {
+        int  abs_code;
+        int  axis;
+        const char *label;
+    } sticks[] = {
+        { ABS_X,  PLAYOS_AXIS_LEFT_X,  "LX" },
+        { ABS_Y,  PLAYOS_AXIS_LEFT_Y,  "LY" },
+        { ABS_RX, PLAYOS_AXIS_RIGHT_X, "RX" },
+        { ABS_RY, PLAYOS_AXIS_RIGHT_Y, "RY" },
+    };
+
+    for (size_t i = 0; i < sizeof(sticks) / sizeof(sticks[0]); i++) {
+        s->stick_cal[sticks[i].axis].min = 0;
+        s->stick_cal[sticks[i].axis].max = 0;
+        s->stick_cal[sticks[i].axis].flat = 0;
+        s->stick_cal[sticks[i].axis].calibrated = false;
+    }
+
+    if (s->evdev_fd < 0)
+        return;
+
+    struct input_absinfo absinfo;
+    for (size_t i = 0; i < sizeof(sticks) / sizeof(sticks[0]); i++) {
+        if (ioctl(s->evdev_fd, EVIOCGABS(sticks[i].abs_code), &absinfo) == 0 &&
+            absinfo.maximum > absinfo.minimum) {
+            s->stick_cal[sticks[i].axis].min = absinfo.minimum;
+            s->stick_cal[sticks[i].axis].max = absinfo.maximum;
+            s->stick_cal[sticks[i].axis].flat = absinfo.flat;
+            s->stick_cal[sticks[i].axis].calibrated = true;
+            PLAYOS_LOG_I("input", "stick calibration %s[%d..%d] flat=%d",
+                         sticks[i].label, absinfo.minimum, absinfo.maximum,
+                         absinfo.flat);
+        } else {
+            PLAYOS_LOG_I("input", "stick calibration %s (fallback -32768..32767)",
+                         sticks[i].label);
+        }
+    }
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int shell_input_init(struct playos_shell *s)
 {
     shell_input_dump_proc_devices();
     shell_input_dump_capabilities();
+
+    /* Watch /dev/input for CREATE/DELETE so a late-appearing gamepad (driver
+     * load, USB/Bluetooth hotplug) is picked up immediately instead of waiting
+     * out the poll-time retry throttle. Best-effort: input still works if the
+     * watch cannot be installed. */
+    s->input_inotify_fd = -1;
+    s->input_inotify_wd = -1;
+    s->input_inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (s->input_inotify_fd >= 0) {
+        s->input_inotify_wd = inotify_add_watch(s->input_inotify_fd,
+                                                "/dev/input",
+                                                IN_CREATE | IN_DELETE | IN_ATTRIB);
+        if (s->input_inotify_wd < 0) {
+            PLAYOS_LOG_W("input", "cannot watch /dev/input: %s", strerror(errno));
+            close(s->input_inotify_fd);
+            s->input_inotify_fd = -1;
+        }
+    } else {
+        PLAYOS_LOG_W("input", "inotify unavailable: %s", strerror(errno));
+    }
 
     s->evdev_fd = find_gamepad_device();
 
@@ -517,6 +625,7 @@ int shell_input_init(struct playos_shell *s)
     s->buttons_pressed = 0;
 
     shell_input_read_trigger_calibration(s);
+    shell_input_read_stick_calibration(s);
 
     return 0;
 }
@@ -657,6 +766,15 @@ static int shell_input_process_event(struct playos_shell *s,
                 shell_input_volume_adjust(s, -0.05f);
             break;
 
+        /* ── ROG Ally rear macro buttons (M1/M2) ──
+         * Both rear macro buttons arrive as KEY_CUT (0x089) on this
+         * hardware, so they are indistinguishable at the evdev level.
+         * Tracked shell-local (not a public game button) for the Live
+         * Input Test only. */
+        case KEY_CUT:
+            s->rear_macro_held = (ev->value != 0);
+            break;
+
         /* ── Hardware power / sleep keys (ACPI power node) ── */
         case KEY_POWER:
         case KEY_SLEEP:
@@ -666,9 +784,23 @@ static int shell_input_process_event(struct playos_shell *s,
         break;
 
     case EV_ABS:
+        /* Analog sticks are bidirectional axes (ABS_X/Y/RX/RY). */
+        if (ev->code == ABS_X) {
+            s->controller.axes[PLAYOS_AXIS_LEFT_X] =
+                shell_input_normalize_stick(s, PLAYOS_AXIS_LEFT_X, ev->value);
+        } else if (ev->code == ABS_Y) {
+            s->controller.axes[PLAYOS_AXIS_LEFT_Y] =
+                shell_input_normalize_stick(s, PLAYOS_AXIS_LEFT_Y, ev->value);
+        } else if (ev->code == ABS_RX) {
+            s->controller.axes[PLAYOS_AXIS_RIGHT_X] =
+                shell_input_normalize_stick(s, PLAYOS_AXIS_RIGHT_X, ev->value);
+        } else if (ev->code == ABS_RY) {
+            s->controller.axes[PLAYOS_AXIS_RIGHT_Y] =
+                shell_input_normalize_stick(s, PLAYOS_AXIS_RIGHT_Y, ev->value);
+        }
         /* Analog triggers are pedals, not buttons. ABS_Z is left trigger
          * and ABS_RZ is right trigger on the ROG Ally / xpad mapping. */
-        if (ev->code == ABS_Z) {
+        else if (ev->code == ABS_Z) {
             s->controller.axes[PLAYOS_AXIS_LEFT_TRIGGER] =
                 shell_input_normalize_trigger(ev->value,
                                               s->trigger_lt_min,
@@ -720,8 +852,32 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
      * because sticks/triggers would flood the log with EV_ABS spam. */
     int raw_log = (name && name[0] && strcmp(name, "gamepad") != 0);
 
+    /* Env-gated latency instrumentation. When PLAYOS_INPUT_LATENCY_LOG is set,
+     * log (at most once per second) how old each drained evdev event is:
+     * ev.time carries the kernel CLOCK_MONOTONIC timestamp at event
+     * generation, so age = drain_time - event_time is queue-to-drain latency.
+     * Off by default — per-event gettimeofday/clock_gettime is otherwise
+     * wasted work on a 60 FPS shell. */
+    static int latency_enabled = -1;
+    static double last_latency_log = 0.0;
+    if (latency_enabled < 0)
+        latency_enabled = getenv("PLAYOS_INPUT_LATENCY_LOG") != NULL;
+
     struct input_event ev;
     while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) {
+        if (latency_enabled == 1) {
+            struct timespec now_ts;
+            clock_gettime(CLOCK_MONOTONIC, &now_ts);
+            double now_s = (double)now_ts.tv_sec + now_ts.tv_nsec * 1e-9;
+            double ev_s = (double)ev.time.tv_sec + ev.time.tv_usec * 1e-6;
+            double age_ms = (now_s - ev_s) * 1000.0;
+            if (s->elapsed_time - last_latency_log >= 1.0) {
+                PLAYOS_LOG_I("input", "latency %s age=%.3f ms (monotonic)",
+                             name, age_ms);
+                last_latency_log = s->elapsed_time;
+            }
+        }
+
         if (raw_log && ev.type == EV_KEY) {
             PLAYOS_LOG_D("input", "%s raw EV_KEY code=0x%x value=%d",
                          name, ev.code, ev.value);
@@ -765,6 +921,22 @@ void shell_input_poll(struct playos_shell *s)
 
     double now = s->elapsed_time;
 
+    /* Hotplug: if /dev/input changed and we still have no gamepad, retry
+     * discovery immediately instead of waiting out the 2s throttle. */
+    if (s->input_inotify_fd >= 0) {
+        char inotify_buf[4096];
+        ssize_t n = read(s->input_inotify_fd, inotify_buf, sizeof(inotify_buf));
+        if (n > 0 && s->evdev_fd < 0) {
+            s->evdev_fd = find_gamepad_device();
+            if (s->evdev_fd >= 0) {
+                PLAYOS_LOG_I("input", "gamepad appeared (inotify) fd=%d",
+                             s->evdev_fd);
+                shell_input_read_trigger_calibration(s);
+                shell_input_read_stick_calibration(s);
+            }
+        }
+    }
+
     /* Auto-retry device discovery if fd is not open.
      * The controller device may appear later (driver load, hotplug). */
     if (s->evdev_fd < 0) {
@@ -779,6 +951,7 @@ void shell_input_poll(struct playos_shell *s)
                 PLAYOS_LOG_I("input", "gamepad appeared after retry (fd=%d)",
                              s->evdev_fd);
                 shell_input_read_trigger_calibration(s);
+                shell_input_read_stick_calibration(s);
             } else {
                 retry_count++;
                 /* First failure and every 15th (~30s) are worth logging. */
