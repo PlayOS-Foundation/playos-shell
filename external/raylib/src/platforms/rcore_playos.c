@@ -593,8 +593,9 @@ static void PlayOSPollGamepad(void)
         { PLAYOS_BUTTON_R1,         GAMEPAD_BUTTON_RIGHT_TRIGGER_1  },
         { PLAYOS_BUTTON_L3,         GAMEPAD_BUTTON_LEFT_THUMB       },
         { PLAYOS_BUTTON_R3,         GAMEPAD_BUTTON_RIGHT_THUMB      },
-        // PLAYOS_BUTTON_SYSTEM (Guide) and PLAYOS_BUTTON_QUICK_MENU are
-        // reserved — intentionally omitted from the gamepad mapping.
+        // PLAYOS_BUTTON_SYSTEM (Guide), PLAYOS_BUTTON_QUICK_MENU and
+        // PLAYOS_BUTTON_POWER are reserved — intentionally omitted from the
+        // gamepad mapping.
     };
 
     for (size_t i = 0; i < sizeof(buttonMap)/sizeof(buttonMap[0]); i++)

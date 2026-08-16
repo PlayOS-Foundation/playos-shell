@@ -408,6 +408,7 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
         { "SELECT",   PLAYOS_BUTTON_SELECT },
         { "HOME",     PLAYOS_BUTTON_SYSTEM },
         { "COMMAND",  PLAYOS_BUTTON_QUICK_MENU },
+        { "PWR",      PLAYOS_BUTTON_POWER },
     };
 
     const float row_h = scale * 16.0f;
@@ -439,14 +440,15 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     /* hid-asus emits the Home (SYSTEM) and Command Center (QUICK_MENU)
      * reserved buttons as momentary pulses: the release follows within a
      * frame or two, so the raw level state lights the pill for only a split
-     * second. Latch the visual for a short window so a press is clearly
-     * visible while testing. */
+     * second. The ACPI power button behaves the same way. Latch the visual
+     * for a short window so a press is clearly visible while testing. */
     static double system_latch_until = 0.0;
     static double quick_latch_until = 0.0;
+    static double power_latch_until = 0.0;
 
     float cursor_x = x;
     for (size_t i = 0; i < pill_count; i++) {
-        bool held = (s->controller.buttons & pills[i].mask) != 0;
+        bool held = shell_input_button_held(s, pills[i].mask) != 0;
 
         if (pills[i].mask == PLAYOS_BUTTON_SYSTEM) {
             if (s->buttons_pressed & PLAYOS_BUTTON_SYSTEM)
@@ -456,6 +458,10 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
             if (s->buttons_pressed & PLAYOS_BUTTON_QUICK_MENU)
                 quick_latch_until = s->elapsed_time + 0.6;
             held = held || (s->elapsed_time < quick_latch_until);
+        } else if (pills[i].mask == PLAYOS_BUTTON_POWER) {
+            if (s->buttons_pressed & PLAYOS_BUTTON_POWER)
+                power_latch_until = s->elapsed_time + 0.6;
+            held = held || (s->elapsed_time < power_latch_until);
         }
 
         float pill_w = input_pill_width(pills[i].label, scale);

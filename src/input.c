@@ -206,6 +206,23 @@ static int is_reserved_vendor_device(int fd)
            !TEST_BIT(BTN_MODE,  key_bits);
 }
 
+/* The ROG Ally exposes the hardware power button as an ACPI "Power Button"
+ * (and a separate "Sleep Button") evdev node. Both report KEY_POWER /
+ * KEY_SLEEP and no gamepad buttons. The shell owns these: games must never
+ * receive a power/suspend key, so we keep them on a dedicated reserved node. */
+static int is_reserved_power_device(int fd)
+{
+    unsigned long key_bits[EVDEV_BITS(KEY_MAX)] = {0};
+
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) < 0)
+        return 0;
+
+    return (TEST_BIT(KEY_POWER, key_bits) ||
+            TEST_BIT(KEY_SLEEP, key_bits)) &&
+           !TEST_BIT(BTN_SOUTH, key_bits) &&
+           !TEST_BIT(BTN_MODE,  key_bits);
+}
+
 /* Append one reserved node fd to the shell's drain list. */
 static void
 shell_input_add_reserved_fd(struct playos_shell *s, int fd, const char *name)
@@ -269,7 +286,12 @@ shell_input_open_reserved_nodes(struct playos_shell *s)
                      strstr(name, "ASUS");
         int home   = is_reserved_home_device(fd);
         int vendor = is_reserved_vendor_device(fd);
+        int power  = is_reserved_power_device(fd);
 
+        /* Priority: home → asus → vendor → power. Power comes last so the
+         * Asus Keyboard node (vendor) and any Asus-named node keep their
+         * existing roles; only genuine ACPI "Power Button"/"Sleep Button"
+         * nodes fall through to the power role. */
         const char *role = NULL;
         if (home)
             role = "home";
@@ -277,6 +299,8 @@ shell_input_open_reserved_nodes(struct playos_shell *s)
             role = "asus";
         else if (vendor)
             role = "vendor";
+        else if (power)
+            role = "power";
 
         if (role) {
             PLAYOS_LOG_I("input", "opened reserved %s node: '%s' (%s) fd=%d",
@@ -632,6 +656,12 @@ static int shell_input_process_event(struct playos_shell *s,
             if (ev->value)
                 shell_input_volume_adjust(s, -0.05f);
             break;
+
+        /* ── Hardware power / sleep keys (ACPI power node) ── */
+        case KEY_POWER:
+        case KEY_SLEEP:
+            input_apply_button(s, PLAYOS_BUTTON_POWER, ev->value);
+            break;
         }
         break;
 
@@ -810,4 +840,14 @@ int shell_input_button_released(const struct playos_shell *s,
 {
     return ((s->controller_prev.buttons & button) != 0) &&
            ((s->controller.buttons & button) == 0);
+}
+
+/* Held query ("IsBeingPressed"): the button bit is currently set. This is the
+ * level state — a fast tap that fully resolves within one poll still lights
+ * the bit for that frame, but callers that need to catch short pulses should
+ * use shell_input_button_pressed() for the edge. */
+int shell_input_button_held(const struct playos_shell *s,
+                            playos_button_mask_t button)
+{
+    return (s->controller.buttons & button) != 0;
 }

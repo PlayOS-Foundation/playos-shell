@@ -143,6 +143,8 @@ int  shell_input_button_pressed(const struct playos_shell *s,
                                 playos_button_mask_t button);
 int  shell_input_button_released(const struct playos_shell *s,
                                  playos_button_mask_t button);
+int  shell_input_button_held(const struct playos_shell *s,
+                             playos_button_mask_t button);
 
 /* ── Raylib PlayOS backend accessor (defined in rcore_playos.c) ──────── */
 
