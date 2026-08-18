@@ -326,6 +326,142 @@ shell_screenshot_toast_draw(struct playos_shell *s)
     render_draw_text(msg, x, y, scale, 1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+/* ── Transient toast + boot-slot reader (Sprint 11) ──────────────────────
+ * A generic short-lived message bar, plus a best-effort reader for
+ * /EFI/playos/boot.json so the Settings screen can show the active A/B slot
+ * and the shell can learn which slot/version a pending update targets. */
+
+void
+shell_set_toast(struct playos_shell *s, const char *msg)
+{
+    if (!s || !msg)
+        return;
+    snprintf(s->toast_msg, sizeof(s->toast_msg), "%s", msg);
+    s->toast_until = s->elapsed_time + 4.0;
+}
+
+static void
+shell_toast_draw(struct playos_shell *s)
+{
+    if (!s->toast_msg[0])
+        return;
+
+    float scale = (float)s->output_height / 240.0f * s->dpi_scale * 0.7f;
+    float w = render_text_width(s->toast_msg, scale);
+    float x = ((float)s->output_width - w) * 0.5f;
+    float y = (float)s->output_height * 0.12f;
+
+    render_draw_rect(x - scale * 2.0f, y - scale, w + scale * 4.0f,
+                     scale * 9.0f, 0.0f, 0.0f, 0.0f, 0.75f);
+    render_draw_text(s->toast_msg, x, y, scale, 1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+/* Minimal hand-rolled JSON string extractor — mirrors playos-init's
+ * boot_slot.c so the shell stays dependency-free. */
+static void
+shell_parse_boot_json_string(const char *json, const char *key,
+                             char *out, size_t outsz)
+{
+    if (!json || !key || !out || outsz == 0)
+        return;
+    out[0] = '\0';
+
+    char needle[64];
+    int n = snprintf(needle, sizeof(needle), "\"%s\"", key);
+    if (n < 0 || (size_t)n >= sizeof(needle))
+        return;
+
+    const char *p = strstr(json, needle);
+    if (!p)
+        return;
+    p = strchr(p, ':');
+    if (!p)
+        return;
+    p = strchr(p + 1, '"');
+    if (!p)
+        return;
+    p++;
+
+    const char *end = strchr(p, '"');
+    if (!end)
+        return;
+
+    size_t len = (size_t)(end - p);
+    if (len >= outsz)
+        len = outsz - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+}
+
+void
+shell_refresh_boot_slot(struct playos_shell *s)
+{
+    if (!s)
+        return;
+
+    snprintf(s->boot_slot, sizeof(s->boot_slot), "unknown");
+    snprintf(s->boot_slot_health, sizeof(s->boot_slot_health), "unknown");
+    snprintf(s->boot_slot_version, sizeof(s->boot_slot_version), "unknown");
+
+    FILE *f = fopen("/EFI/playos/boot.json", "rb");
+    if (!f)
+        return;
+
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (n == 0)
+        return;
+    buf[n] = '\0';
+
+    char active[16];
+    shell_parse_boot_json_string(buf, "active_slot", active, sizeof(active));
+    if (active[0] != 'a' && active[0] != 'b')
+        return;
+    snprintf(s->boot_slot, sizeof(s->boot_slot), "%s", active);
+
+    /* Extract the active slot's { ... } object and read health + version. */
+    const char *slot_name = (active[0] == 'b') ? "slot_b" : "slot_a";
+    char slot_needle[64];
+    snprintf(slot_needle, sizeof(slot_needle), "\"%s\"", slot_name);
+
+    const char *p = strstr(buf, slot_needle);
+    if (!p)
+        return;
+    p = strchr(p, '{');
+    if (!p)
+        return;
+
+    const char *end = p;
+    int depth = 0;
+    while (*end) {
+        if (*end == '{')
+            depth++;
+        else if (*end == '}') {
+            depth--;
+            if (depth == 0)
+                break;
+        }
+        end++;
+    }
+    if (depth != 0 || *end != '}')
+        return;
+
+    size_t len = (size_t)(end - p) + 1;
+    if (len >= 256)
+        return;
+    char slot_buf[256];
+    memcpy(slot_buf, p, len);
+    slot_buf[len] = '\0';
+
+    shell_parse_boot_json_string(slot_buf, "health",
+                                 s->boot_slot_health,
+                                 sizeof(s->boot_slot_health));
+    shell_parse_boot_json_string(slot_buf, "version",
+                                 s->boot_slot_version,
+                                 sizeof(s->boot_slot_version));
+}
+
 /* ── Screen navigation helpers ───────────────────────────────────────── */
 
 static void
@@ -595,6 +731,36 @@ main(int argc, char *argv[])
                     s->last_status_refresh.tv_sec = 0;
                     s->last_status_refresh.tv_nsec = 0;
                 }
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_UPDATE_PROGRESS) == 0) {
+                    /* playos-init streams this as a bare type string; the
+                     * numeric percent / stage live in json_raw which
+                     * playos_trusted_shell_poll() discards, so there is no
+                     * number to display — keep the gauge at 0%. */
+                    s->update_in_progress = true;
+                    s->update_ready = false;
+                    snprintf(s->update_step, sizeof(s->update_step),
+                             "Applying update...");
+                    PLAYOS_LOG_I("shell", "async: update in progress");
+                }
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_UPDATE_COMPLETE) == 0) {
+                    s->update_in_progress = false;
+                    s->update_ready = true;
+                    s->update_percent = 100;
+                    snprintf(s->update_step, sizeof(s->update_step),
+                             "Update ready");
+                    shell_refresh_boot_slot(s);
+                    shell_set_toast(s, "Update ready - restart to apply");
+                    PLAYOS_LOG_I("shell", "async: update complete — ready to apply");
+                }
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_UPDATE_ERROR) == 0) {
+                    s->update_in_progress = false;
+                    s->update_ready = false;
+                    s->update_percent = 0;
+                    snprintf(s->update_step, sizeof(s->update_step),
+                             "Update failed");
+                    shell_set_toast(s, "Update failed");
+                    PLAYOS_LOG_W("shell", "async: update error");
+                }
             } else if (r < 0) {
                 PLAYOS_LOG_W("shell", "async listener closed by init");
                 playos_trusted_disconnect(shell_listener_fd);
@@ -632,6 +798,9 @@ main(int argc, char *argv[])
 
             if (s->elapsed_time < s->screenshot_flash_until)
                 shell_screenshot_toast_draw(s);
+
+            if (s->elapsed_time < s->toast_until)
+                shell_toast_draw(s);
 
             render_end_frame(s);   /* EndDrawing() + swap via backend */
             frame_count++;

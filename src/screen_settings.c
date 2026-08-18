@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
 
 #ifdef PLAYOS_TRUSTED_IPC
 #include "playos-runtime/trusted_control.h"
@@ -118,9 +119,14 @@ settings_content_height(const struct playos_shell *s, int tab)
     case TAB_AUDIO:
     case TAB_POWER:
         return 3.0f * info_h;
-    case TAB_SYSTEM:
-        /* 4 info lines + gap + screenshot toggle row + 2 power rows. */
-        return 4.0f * info_h + row_h + 3.0f * row_h;
+    case TAB_SYSTEM: {
+        /* 5 info lines + gap + screenshot toggle row + 2 power rows +
+         * gap + 3 software-update rows (+ progress row while applying). */
+        float h = 5.0f * info_h + 8.0f * row_h;
+        if (s->update_in_progress)
+            h += 3.0f * row_h;   /* gap + gauge line + step line */
+        return h;
+    }
     case TAB_NETWORK:
         return 4.0f * info_h;
     case TAB_INPUT:
@@ -179,6 +185,48 @@ display_adjust_brightness(struct playos_shell *s, int delta)
     return -1;
 }
 
+/* Scan /data/updates for exactly one *.playosb bundle. Returns true and
+ * records its path in s->update_bundle_path when there is exactly one;
+ * otherwise clears the found flag and returns false. */
+static bool
+settings_scan_update_bundle(struct playos_shell *s)
+{
+    s->update_bundle_found = false;
+    s->update_bundle_path[0] = '\0';
+
+    DIR *dir = opendir("/data/updates");
+    if (!dir)
+        return false;
+
+    struct dirent *de;
+    while ((de = readdir(dir)) != NULL) {
+        const char *name = de->d_name;
+        if (name[0] == '.')
+            continue;
+
+        size_t len = strlen(name);
+        if (len <= 8)
+            continue;
+        if (strcmp(name + len - 8, ".playosb") != 0)
+            continue;
+
+        if (s->update_bundle_found) {
+            /* More than one bundle: ambiguous, clear and bail. */
+            s->update_bundle_found = false;
+            s->update_bundle_path[0] = '\0';
+            closedir(dir);
+            return false;
+        }
+
+        snprintf(s->update_bundle_path, sizeof(s->update_bundle_path),
+                 "/data/updates/%s", name);
+        s->update_bundle_found = true;
+    }
+
+    closedir(dir);
+    return s->update_bundle_found;
+}
+
 /* ── Enter ─────────────────────────────────────────────────────────────── */
 
 void
@@ -189,6 +237,8 @@ screen_settings_enter(struct playos_shell *s)
     s->settings_content_scroll = 0.0f;
     s->settings_power_cursor = 0;
     s->power_confirm = false;
+    s->update_restart_confirm = false;
+    shell_refresh_boot_slot(s);
 }
 
 /* ── Update ────────────────────────────────────────────────────────────── */
@@ -196,6 +246,23 @@ screen_settings_enter(struct playos_shell *s)
 void
 screen_settings_update(struct playos_shell *s)
 {
+    /* ── Restart-to-apply confirmation modal ───────────────────────────── */
+    if (s->update_restart_confirm) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+#ifdef PLAYOS_TRUSTED_IPC
+            PLAYOS_LOG_I("shell", "settings: restart to apply confirmed");
+            playos_trusted_reboot(-1);
+#else
+            PLAYOS_LOG_W("shell", "settings: restart to apply requested "
+                         "(trusted IPC not available)");
+            s->update_restart_confirm = false;
+#endif
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+            s->update_restart_confirm = false;
+        }
+        return;
+    }
+
     /* ── Power confirmation modal ─────────────────────────────────────── */
     if (s->power_confirm) {
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
@@ -244,23 +311,71 @@ screen_settings_update(struct playos_shell *s)
 
     /* D-pad U/D: vertical navigation / scrolling. */
     if (s->settings_tab == TAB_SYSTEM) {
-        /* System tab: 0 = Screenshot toggle, 1 = Power Off, 2 = Restart. */
+        /* System tab: 0 = Screenshot toggle, 1 = Power Off, 2 = Restart,
+         * 3 = Check for Update, 4 = Apply Update, 5 = Restart to Apply. */
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
             if (s->settings_power_cursor > 0)
                 s->settings_power_cursor--;
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
-            if (s->settings_power_cursor < 2)
+            if (s->settings_power_cursor < 5)
                 s->settings_power_cursor++;
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
-            if (s->settings_power_cursor == 0) {
+            switch (s->settings_power_cursor) {
+            case 0:
                 s->screenshot_enabled = !s->screenshot_enabled;
                 PLAYOS_LOG_I("shell", "settings: screenshot capture %s",
                              s->screenshot_enabled ? "enabled" : "disabled");
-            } else {
+                break;
+            case 1:
+            case 2:
                 s->power_confirm = true;
                 return;
+            case 3: {
+                /* Check: scan /data/updates for exactly one *.playosb. */
+                if (settings_scan_update_bundle(s)) {
+                    const char *base = strrchr(s->update_bundle_path, '/');
+                    base = base ? base + 1 : s->update_bundle_path;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Update found: %.220s", base);
+                    shell_set_toast(s, msg);
+                } else {
+                    shell_set_toast(s, "No update found (place .playosb "
+                                        "in /data/updates)");
+                }
+                break;
+            }
+            case 4:
+                if (!s->update_bundle_found) {
+                    shell_set_toast(s, "No bundle selected");
+                    break;
+                }
+                s->update_in_progress = true;
+                s->update_ready = false;
+                s->update_percent = 0;
+                snprintf(s->update_step, sizeof(s->update_step),
+                         "Applying update...");
+                shell_set_toast(s, "Applying update...");
+#ifdef PLAYOS_TRUSTED_IPC
+                if (playos_trusted_apply_update(s->update_bundle_path) != 0) {
+                    s->update_in_progress = false;
+                    shell_set_toast(s, "Update failed");
+                }
+#else
+                PLAYOS_LOG_W("shell", "settings: apply update requested "
+                             "(trusted IPC not available)");
+                s->update_in_progress = false;
+                shell_set_toast(s, "Update failed");
+#endif
+                break;
+            case 5:
+                if (s->update_ready) {
+                    s->update_restart_confirm = true;
+                    return;
+                }
+                shell_set_toast(s, "No update ready to apply");
+                break;
             }
         }
     } else if (s->settings_tab == TAB_DISPLAY) {
@@ -528,6 +643,42 @@ draw_screenshot_toggle_row(struct playos_shell *s, float x, float *y,
     draw_toggle_switch(switch_cx, switch_cy, scale, s->screenshot_enabled);
 
     *y += scale * 8.0f;
+}
+
+/* Software-update progress row: "Update" label, a horizontal gauge showing
+ * update_percent, and the human-readable update_step on a second line. */
+static void
+draw_update_progress_row(struct playos_shell *s, float x, float *y,
+                         float scale)
+{
+    int w = s->output_width;
+
+    char pct[32];
+    snprintf(pct, sizeof(pct), "%d%%", s->update_percent);
+
+    render_draw_text("Update", x, *y, scale, 0.6f, 0.6f, 0.7f, 1.0f);
+
+    float label_w = render_text_width("Update", scale);
+    float gauge_x = x + label_w + scale * 2.0f;
+    float value_x = (float)w - x;
+    float gauge_w = value_x - gauge_x - scale * 14.0f;
+    if (gauge_w < scale * 10.0f)
+        gauge_w = scale * 10.0f;
+
+    draw_trigger_gauge(gauge_x, *y, gauge_w, scale * 5.0f,
+                       (float)s->update_percent / 100.0f);
+
+    float value_w = render_text_width(pct, scale);
+    render_draw_text(pct, value_x - value_w, *y, scale,
+                     0.9f, 0.9f, 0.9f, 1.0f);
+
+    *y += scale * 8.0f;
+
+    if (s->update_step[0]) {
+        render_draw_text(s->update_step, x, *y, scale,
+                         0.6f, 0.6f, 0.7f, 1.0f);
+        *y += scale * 8.0f;
+    }
 }
 
 /* Analog stick indicator: a ring with a moving dot. The dot follows the
@@ -860,6 +1011,15 @@ screen_settings_draw(struct playos_shell *s)
             draw_info_line(s, "OS Version", os_ver,
                            content_x, &content_y, label_scale, value_scale);
 
+            char slot[64];
+            if (s->boot_slot[0] == 'a' || s->boot_slot[0] == 'b')
+                snprintf(slot, sizeof(slot), "%s (%s)",
+                         s->boot_slot, s->boot_slot_health);
+            else
+                snprintf(slot, sizeof(slot), "unknown");
+            draw_info_line(s, "Slot", slot,
+                           content_x, &content_y, label_scale, value_scale);
+
             const char *cpu = playos_system_cpu_description();
             draw_info_line(s, "CPU", cpu,
                            content_x, &content_y, label_scale, value_scale);
@@ -892,6 +1052,51 @@ screen_settings_draw(struct playos_shell *s)
                                  sel ? 1.0f : 0.6f,
                                  1.0f);
                 content_y += label_scale * 8.0f;
+            }
+
+            /* ── Software update rows ── */
+            content_y += label_scale * 8.0f;
+            static const char *update_labels[3] = {
+                "Check for Update", "Apply Update", "Restart to Apply"
+            };
+            for (int i = 0; i < 3; i++) {
+                int cursor = 3 + i;
+                bool sel = (cursor == s->settings_power_cursor);
+                bool disabled = (cursor == 5 && !s->update_ready);
+                float dim = disabled ? 0.4f : 0.6f;
+
+                if (sel) {
+                    render_draw_rect(content_x,
+                                     content_y - label_scale * 0.5f,
+                                     row_w, label_scale * 7.0f,
+                                     0.84f, 0.42f, 0.0f, 0.9f);
+                }
+
+                float r = sel ? 1.0f : dim;
+                render_draw_text(update_labels[i], content_x,
+                                 content_y - label_scale * 0.5f,
+                                 label_scale, r, r, r, 1.0f);
+
+                /* Show the pending target version next to "Restart to
+                 * Apply" once an update is ready. */
+                if (cursor == 5 && s->update_ready && s->boot_slot_version[0] &&
+                    strcmp(s->boot_slot_version, "unknown") != 0) {
+                    char vbuf[80];
+                    snprintf(vbuf, sizeof(vbuf), "v%s", s->boot_slot_version);
+                    float vw = render_text_width(vbuf, label_scale * 0.8f);
+                    render_draw_text(vbuf, (float)w - content_x - vw,
+                                     content_y - label_scale * 0.5f,
+                                     label_scale * 0.8f,
+                                     0.9f, 0.9f, 0.9f, 1.0f);
+                }
+
+                content_y += label_scale * 8.0f;
+            }
+
+            if (s->update_in_progress) {
+                content_y += label_scale * 8.0f;
+                draw_update_progress_row(s, content_x, &content_y,
+                                         label_scale);
             }
         }
         break;
@@ -939,6 +1144,25 @@ screen_settings_draw(struct playos_shell *s)
                                  : "Power off PlayOS?";
         float action_w = render_text_width(action, modal_scale);
         render_draw_text(action, ((float)w - action_w) * 0.5f,
+                         (float)h * 0.40f, modal_scale,
+                         1.0f, 1.0f, 1.0f, 1.0f);
+
+        const char *confirm_hint = "A: Confirm    B: Cancel";
+        float confirm_w = render_text_width(confirm_hint, modal_scale * 0.72f);
+        render_draw_text(confirm_hint, ((float)w - confirm_w) * 0.5f,
+                         (float)h * 0.52f, modal_scale * 0.72f,
+                         0.8f, 0.8f, 0.9f, 1.0f);
+    }
+
+    /* ── Restart-to-apply confirmation modal ── */
+    if (s->update_restart_confirm) {
+        render_draw_rect(0.0f, 0.0f, (float)w, (float)h,
+                         0.0f, 0.0f, 0.0f, 0.7f);
+
+        float modal_scale = header_scale * 0.75f;
+        const char *title = "Restart to apply update?";
+        float title_w = render_text_width(title, modal_scale);
+        render_draw_text(title, ((float)w - title_w) * 0.5f,
                          (float)h * 0.40f, modal_scale,
                          1.0f, 1.0f, 1.0f, 1.0f);
 

@@ -124,8 +124,10 @@ struct playos_shell {
     int    settings_tab;            /* active tab (see TAB_* enum in screen_settings.c) */
     float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */
     float  settings_content_scroll; /* vertical content scroll offset (px) */
-    /* ── Power actions (System tab) ── */
-    int    settings_power_cursor;   /* 0 = Screenshot, 1 = Power Off, 2 = Restart */
+    /* ── Selectable rows (System tab) ── */
+    int    settings_power_cursor;   /* 0 = Screenshot, 1 = Power Off, 2 = Restart,
+                                       3 = Check for Update, 4 = Apply Update,
+                                       5 = Restart to Apply */
     bool   power_confirm;           /* confirmation dialog active */
 
     /* ── Screenshot (System tab, COMMAND reserved button) ── */
@@ -133,12 +135,34 @@ struct playos_shell {
     bool   screenshot_pending;      /* one-frame request to capture */
     bool   screenshot_ok;           /* last capture result */
     double screenshot_flash_until;  /* elapsed_time until toast hides */
+
+    /* ── Software update (Sprint 11) ── */
+    char   update_bundle_path[512]; /* selected *.playosb from /data/updates */
+    bool   update_bundle_found;     /* a single update bundle was found */
+    bool   update_in_progress;      /* ApplyUpdate accepted; events streaming */
+    bool   update_ready;            /* UpdateComplete received; reboot to apply */
+    int    update_percent;          /* coarse 0..100 progress (IPC gives none) */
+    char   update_step[64];         /* human-readable progress label */
+    char   boot_slot[16];           /* boot.json active slot 'a'/'b' or unknown */
+    char   boot_slot_health[16];    /* active slot health, or "unknown" */
+    char   boot_slot_version[64];   /* active slot version, or "unknown" */
+    bool   update_restart_confirm;  /* "Restart to apply update?" modal active */
+
+    /* ── Transient toast (Sprint 11) ── */
+    char   toast_msg[256];          /* message shown while toast_until active */
+    double toast_until;             /* elapsed_time until toast hides */
+
     /* ── (ipc_fd removed — per-call connect/launch/disconnect pattern) ── */
 };
 
 /* ── Lifecycle (defined in main.c) ──────────────────────────────────── */
 
 void shell_handle_lifecycle(struct playos_shell *s);
+
+/* ── Transient toast + boot slot (defined in main.c) ─────────────────── */
+
+void shell_set_toast(struct playos_shell *s, const char *msg);
+void shell_refresh_boot_slot(struct playos_shell *s);
 
 /* ── Screen functions (defined in screen_*.c) ────────────────────────── */
 
