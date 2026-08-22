@@ -93,20 +93,12 @@ shell_play_confirm(void)
 static void
 shell_audio_init(void)
 {
-    InitAudioDevice();
-    g_audio_ready = IsAudioDeviceReady();
-    if (!g_audio_ready) {
-        PLAYOS_LOG_W("shell", "audio device unavailable — UI sounds disabled");
-        return;
-    }
-
-    g_nav_sound = shell_make_tone(660.0f, 0.07f);
-    g_confirm_sound = shell_make_tone(880.0f, 0.12f);
-
-    if (IsSoundValid(g_confirm_sound))
-        PlaySound(g_confirm_sound);   /* startup chime */
-
-    PLAYOS_LOG_I("shell", "audio device ready — UI sounds enabled");
+    /* Playback-device init is deferred to shell_audio_bootstrap(): the Ally's
+     * Realtek ALC294 + CS35L41 card (card 1) registers a few seconds after
+     * boot, after this one-shot init runs, so opening the device here would
+     * reliably lose the race on a cold boot and leave UI sounds disabled for
+     * the whole process lifetime. */
+    g_audio_ready = false;
 }
 
 /* One-time audio bootstrap (Sprint 9 follow-up): the Ally's Realtek codec
@@ -129,6 +121,45 @@ shell_audio_apply_defaults(void)
         g_audio_defaults_applied = true;
         PLAYOS_LOG_I("shell", "audio defaults applied (volume=0.70, unmuted)");
     }
+}
+
+/* Per-frame playback-device bootstrap (see shell_audio_init()). Retry
+ * InitAudioDevice() on a cooldown until the late-registering audio card
+ * appears, then build the UI tones and play the startup chime. Repeated
+ * InitAudioDevice() is safe: every failure path in raudio.c uninitializes the
+ * half-built context/device and leaves isReady=false. */
+static void
+shell_audio_bootstrap(void)
+{
+    if (g_audio_ready)
+        return;
+
+    static double next_retry = 0.0;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    if (now < next_retry)
+        return;
+    next_retry = now + 1.0;   /* at most once per second */
+
+    InitAudioDevice();
+    g_audio_ready = IsAudioDeviceReady();
+    if (!g_audio_ready) {
+        static int warned = 0;
+        if (!warned) {
+            PLAYOS_LOG_W("shell", "audio device not ready yet — will retry");
+            warned = 1;
+        }
+        return;
+    }
+
+    g_nav_sound = shell_make_tone(660.0f, 0.07f);
+    g_confirm_sound = shell_make_tone(880.0f, 0.12f);
+
+    if (IsSoundValid(g_confirm_sound))
+        PlaySound(g_confirm_sound);   /* startup chime */
+
+    PLAYOS_LOG_I("shell", "audio device ready — UI sounds enabled");
 }
 
 static void
@@ -658,8 +689,10 @@ main(int argc, char *argv[])
             shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU))
             s->screenshot_pending = true;
 
-        /* One-time audio bootstrap: unmute + default volume once the mixer
-         * card becomes available (see shell_audio_apply_defaults()). */
+        /* Audio bootstrap: (1) open the playback device once the late-
+         * registering card appears, (2) apply unmute + default volume once the
+         * mixer is available. */
+        shell_audio_bootstrap();
         shell_audio_apply_defaults();
 
         /* UI sounds: confirm on A, navigation on d-pad / shoulders / back. */
