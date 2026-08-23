@@ -48,6 +48,9 @@ screen_game_detail_update(struct playos_shell *s)
         if (ret == 0) {
             PLAYOS_LOG_I("shell", "game_detail: launch accepted for '%s'",
                          game_id);
+            /* init has already spawned the game by the time the LaunchGameAck
+             * returns, so it is safe to treat the game as running here. */
+            s->game_running = true;
         } else {
             PLAYOS_LOG_E("shell", "game_detail: launch failed for '%s'",
                          game_id);
@@ -59,8 +62,17 @@ screen_game_detail_update(struct playos_shell *s)
         /* Stay on this screen */
     }
 
-    /* B: back to library */
+    /* B: back to library. If a game is running, tell init to terminate it
+     * first — otherwise the game keeps running and its foregrounded surface
+     * stays on top of the shell. */
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+#ifdef PLAYOS_TRUSTED_IPC
+        if (s->game_running) {
+            PLAYOS_LOG_I("shell", "game_detail: terminating running game");
+            playos_trusted_terminate_game(-1);
+            s->game_running = false;
+        }
+#endif
         s->current_screen = SCREEN_LIBRARY;
         screen_library_enter(s);
         return;

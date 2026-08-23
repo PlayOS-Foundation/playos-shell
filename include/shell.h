@@ -110,6 +110,7 @@ struct playos_shell {
 
     /* ── Lifecycle ── */
     bool   is_suspended;
+    bool   game_running;   /* a game is launched and has not yet exited */
 
     /* ── Power / thermal status (Sprint 9) ── */
     PlayOSPowerInfo  power_info;          /* Cached battery/temp/profile state */

@@ -740,11 +740,14 @@ main(int argc, char *argv[])
                 if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_CRASHED) == 0) {
                     PLAYOS_LOG_W("shell", "async: game crashed");
                     s->is_suspended = false;
+                    s->game_running = false;
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_EXITED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game exited");
                     s->is_suspended = false;
+                    s->game_running = false;
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_STARTED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game started");
+                    s->game_running = true;
                     /* A foreground game occludes the shell surface. Suspend
                      * drawing so the main loop keeps polling evdev at full
                      * cadence instead of blocking on Wayland frame callbacks
