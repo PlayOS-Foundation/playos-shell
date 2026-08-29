@@ -125,6 +125,7 @@ set(RAYLIB_LIB raylib)
 set(SHELL_SOURCES
     src/main.c
     src/input.c
+    src/gamepad_db.c
     src/screen_home.c
     src/screen_library.c
     src/screen_game_detail.c

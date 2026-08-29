@@ -19,6 +19,7 @@
 #endif
 
 #include "shell.h"
+#include "gamepad_db.h"
 #include "playos/playos_audio.h"
 #include "playos/playos_input.h"
 #include "playos/playos_logging.h"
@@ -97,7 +98,9 @@ static int is_gamepad_device(int fd)
  * port (phys "usb-0000:09:00.3-2/input0"), but its face buttons are wired
  * rotated: physical X reports BTN_NORTH and physical Y reports BTN_WEST.
  * A and B are standard. Swap NORTH<->WEST only for that device so external
- * Xbox pads on other ports keep the standard mapping. Env override:
+ * Xbox pads on other ports keep the standard mapping. When a
+ * SDL_GameControllerDB entry matches (g_db_from), the entry already encodes
+ * the correct X/Y and the swap is disabled. Env override:
  * PLAYOS_ROG_ALLY_FACE_SWAP=1 forces the swap, =0 forces it off. */
 static int shell_input_rog_ally_face_swap(const char *name, const char *phys)
 {
@@ -112,9 +115,29 @@ static int shell_input_rog_ally_face_swap(const char *name, const char *phys)
            strncmp(phys, "usb-0000:09:00.3-2", 18) == 0;
 }
 
+/* Per-device remap resolved from the SDL_GameControllerDB (Sprint 13.6).
+ * The shell's trusted evdev path uses the same database as the game path. */
+static struct playos_db_remap g_db_remap;
+static int g_db_from = 0;
+
+static const playos_button_mask_t DB_BUTTON_MASKS[PLAYOS_DB_BTN_COUNT] = {
+    PLAYOS_BUTTON_SOUTH,   /* A */
+    PLAYOS_BUTTON_EAST,    /* B */
+    PLAYOS_BUTTON_WEST,    /* X */
+    PLAYOS_BUTTON_NORTH,   /* Y */
+    PLAYOS_BUTTON_SELECT,
+    PLAYOS_BUTTON_START,
+    PLAYOS_BUTTON_L3,
+    PLAYOS_BUTTON_R3,
+    PLAYOS_BUTTON_L1,
+    PLAYOS_BUTTON_R1,
+};
+
 static void shell_input_detect_face_swap(struct playos_shell *s)
 {
     s->gamepad_face_swap = 0;
+    g_db_from = 0;
+    playos_db_default_remap(&g_db_remap);
     if (s->evdev_fd < 0)
         return;
 
@@ -126,6 +149,25 @@ static void shell_input_detect_face_swap(struct playos_shell *s)
     s->gamepad_face_swap = shell_input_rog_ally_face_swap(name, phys);
     PLAYOS_LOG_I("input", "gamepad face-swap quirk %s (name='%s' phys='%s')",
                  s->gamepad_face_swap ? "ON" : "off", name, phys);
+
+    /* Resolve the SDL_GameControllerDB entry (Sprint 13.6). */
+    struct input_id id;
+    memset(&id, 0, sizeof(id));
+    ioctl(s->evdev_fd, EVIOCGID, &id);
+
+    struct playos_db_evdev_tables tables;
+    if (playos_db_build_tables(s->evdev_fd, &tables) == 0 &&
+        playos_db_resolve(&tables, id.bustype, id.vendor, id.product,
+                          id.version, &g_db_remap) == 0) {
+        g_db_from = 1;
+        PLAYOS_LOG_I("input", "gamepad DB entry matched (name='%s' "
+                     "bustype=%04x vendor=%04x product=%04x)",
+                     name, id.bustype, id.vendor, id.product);
+    } else {
+        PLAYOS_LOG_I("input", "no gamepad DB entry for '%s' "
+                     "(bustype=%04x vendor=%04x product=%04x) — Xbox fallback",
+                     name, id.bustype, id.vendor, id.product);
+    }
 }
 
 static int find_gamepad_device(void)
@@ -162,14 +204,18 @@ static int find_gamepad_device(void)
             char name[256] = {0};
             ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
 
-            /* Prefer Xbox/Ally controllers over generic HID */
+            /* Prefer Xbox/Ally/PlayStation controllers over generic HID */
             if (strstr(name, "Xbox") || strstr(name, "xbox") ||
                 strstr(name, "X-Box") ||
                 strstr(name, "Microsoft") ||
                 strstr(name, "ASUE") ||        /* ASUS ROG Ally (all models) */
                 strstr(name, "ASUS") ||
                 strstr(name, "ROG Ally") ||
-                strstr(name, "Gamepad")) {     /* Catch "ASUE* Gamepad" etc. */
+                strstr(name, "Gamepad") ||
+                strstr(name, "Sony") ||
+                strstr(name, "DualSense") ||
+                strstr(name, "DualShock") ||
+                strstr(name, "Wireless Controller")) {
                 PLAYOS_LOG_I("input", "found gamepad: '%s' (%s) fd=%d",
                              name, path, fd);
                 closedir(dir);
@@ -539,14 +585,18 @@ shell_input_read_trigger_calibration(struct playos_shell *s)
 
     struct input_absinfo absinfo;
 
-    if (ioctl(s->evdev_fd, EVIOCGABS(ABS_Z), &absinfo) == 0 &&
+    if (g_db_remap.abs_left_trigger >= 0 &&
+        ioctl(s->evdev_fd, EVIOCGABS(g_db_remap.abs_left_trigger),
+              &absinfo) == 0 &&
         absinfo.maximum > absinfo.minimum) {
         s->trigger_lt_min = absinfo.minimum;
         s->trigger_lt_max = absinfo.maximum;
         s->trigger_lt_calibrated = true;
     }
 
-    if (ioctl(s->evdev_fd, EVIOCGABS(ABS_RZ), &absinfo) == 0 &&
+    if (g_db_remap.abs_right_trigger >= 0 &&
+        ioctl(s->evdev_fd, EVIOCGABS(g_db_remap.abs_right_trigger),
+              &absinfo) == 0 &&
         absinfo.maximum > absinfo.minimum) {
         s->trigger_rt_min = absinfo.minimum;
         s->trigger_rt_max = absinfo.maximum;
@@ -570,14 +620,19 @@ static void
 shell_input_read_stick_calibration(struct playos_shell *s)
 {
     static const struct {
-        int  abs_code;
         int  axis;
         const char *label;
     } sticks[] = {
-        { ABS_X,  PLAYOS_AXIS_LEFT_X,  "LX" },
-        { ABS_Y,  PLAYOS_AXIS_LEFT_Y,  "LY" },
-        { ABS_RX, PLAYOS_AXIS_RIGHT_X, "RX" },
-        { ABS_RY, PLAYOS_AXIS_RIGHT_Y, "RY" },
+        { PLAYOS_AXIS_LEFT_X,  "LX" },
+        { PLAYOS_AXIS_LEFT_Y,  "LY" },
+        { PLAYOS_AXIS_RIGHT_X, "RX" },
+        { PLAYOS_AXIS_RIGHT_Y, "RY" },
+    };
+    const int abs_codes[] = {
+        g_db_remap.abs_left_x,
+        g_db_remap.abs_left_y,
+        g_db_remap.abs_right_x,
+        g_db_remap.abs_right_y,
     };
 
     for (size_t i = 0; i < sizeof(sticks) / sizeof(sticks[0]); i++) {
@@ -592,7 +647,8 @@ shell_input_read_stick_calibration(struct playos_shell *s)
 
     struct input_absinfo absinfo;
     for (size_t i = 0; i < sizeof(sticks) / sizeof(sticks[0]); i++) {
-        if (ioctl(s->evdev_fd, EVIOCGABS(sticks[i].abs_code), &absinfo) == 0 &&
+        if (abs_codes[i] >= 0 &&
+            ioctl(s->evdev_fd, EVIOCGABS(abs_codes[i]), &absinfo) == 0 &&
             absinfo.maximum > absinfo.minimum) {
             s->stick_cal[sticks[i].axis].min = absinfo.minimum;
             s->stick_cal[sticks[i].axis].max = absinfo.maximum;
@@ -715,49 +771,46 @@ static int shell_input_process_event(struct playos_shell *s,
                                      int face_swap)
 {
     switch (ev->type) {
-    case EV_KEY:
-        switch (ev->code) {
-        /* ── Face buttons ── */
-        case BTN_SOUTH:
-            input_apply_button(s, PLAYOS_BUTTON_SOUTH, ev->value);
-            break;
-        case BTN_EAST:
-            input_apply_button(s, PLAYOS_BUTTON_EAST, ev->value);
-            break;
-        case BTN_WEST:
-            input_apply_button(s, face_swap ? PLAYOS_BUTTON_NORTH
-                                            : PLAYOS_BUTTON_WEST, ev->value);
-            break;
-        case BTN_NORTH:
-            input_apply_button(s, face_swap ? PLAYOS_BUTTON_WEST
-                                            : PLAYOS_BUTTON_NORTH, ev->value);
-            break;
+    case EV_KEY: {
+        uint16_t code = ev->code;
+        if (face_swap) {
+            if (code == BTN_WEST)
+                code = BTN_NORTH;
+            else if (code == BTN_NORTH)
+                code = BTN_WEST;
+        }
 
-        /* ── Start / Select ── */
-        case BTN_START:
-            input_apply_button(s, PLAYOS_BUTTON_START, ev->value);
-            break;
-        case BTN_SELECT:
-            input_apply_button(s, PLAYOS_BUTTON_SELECT, ev->value);
-            break;
+        /* Standard buttons through the per-device DB remap. */
+        for (size_t i = 0; i < PLAYOS_DB_BTN_COUNT; i++) {
+            if ((int)code == g_db_remap.buttons[i]) {
+                input_apply_button(s, DB_BUTTON_MASKS[i], ev->value);
+                return 0;
+            }
+        }
 
-        /* ── Shoulder buttons / triggers ── */
-        case BTN_TL:
-            input_apply_button(s, PLAYOS_BUTTON_L1, ev->value);
-            break;
-        case BTN_TR:
-            input_apply_button(s, PLAYOS_BUTTON_R1, ev->value);
-            break;
+        /* D-pad as buttons (pads without an ABS_HAT). */
+        if (g_db_remap.dpad_hat_x < 0) {
+            if ((int)code == g_db_remap.dpad_btn_up) {
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_UP, ev->value);
+                return 0;
+            }
+            if ((int)code == g_db_remap.dpad_btn_down) {
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_DOWN, ev->value);
+                return 0;
+            }
+            if ((int)code == g_db_remap.dpad_btn_left) {
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_LEFT, ev->value);
+                return 0;
+            }
+            if ((int)code == g_db_remap.dpad_btn_right) {
+                input_apply_button(s, PLAYOS_BUTTON_DPAD_RIGHT, ev->value);
+                return 0;
+            }
+        }
 
-        /* ── Stick clicks ── */
-        case BTN_THUMBL:
-            input_apply_button(s, PLAYOS_BUTTON_L3, ev->value);
-            break;
-        case BTN_THUMBR:
-            input_apply_button(s, PLAYOS_BUTTON_R3, ev->value);
-            break;
-
-        /* ── D-pad as buttons (hid-asus and some drivers) ── */
+        switch (code) {
+        /* ── D-pad as buttons (hid-asus and some drivers report both
+         *     ABS_HAT and BTN_DPAD_*; keep the legacy fallback) ── */
         case BTN_DPAD_UP:
             input_apply_button(s, PLAYOS_BUTTON_DPAD_UP, ev->value);
             break;
@@ -827,31 +880,31 @@ static int shell_input_process_event(struct playos_shell *s,
             break;
         }
         break;
+    }
 
     case EV_ABS:
-        /* Analog sticks are bidirectional axes (ABS_X/Y/RX/RY). */
-        if (ev->code == ABS_X) {
+        /* Analog sticks are bidirectional axes. */
+        if (ev->code == g_db_remap.abs_left_x) {
             s->controller.axes[PLAYOS_AXIS_LEFT_X] =
                 shell_input_normalize_stick(s, PLAYOS_AXIS_LEFT_X, ev->value);
-        } else if (ev->code == ABS_Y) {
+        } else if (ev->code == g_db_remap.abs_left_y) {
             s->controller.axes[PLAYOS_AXIS_LEFT_Y] =
                 shell_input_normalize_stick(s, PLAYOS_AXIS_LEFT_Y, ev->value);
-        } else if (ev->code == ABS_RX) {
+        } else if (ev->code == g_db_remap.abs_right_x) {
             s->controller.axes[PLAYOS_AXIS_RIGHT_X] =
                 shell_input_normalize_stick(s, PLAYOS_AXIS_RIGHT_X, ev->value);
-        } else if (ev->code == ABS_RY) {
+        } else if (ev->code == g_db_remap.abs_right_y) {
             s->controller.axes[PLAYOS_AXIS_RIGHT_Y] =
                 shell_input_normalize_stick(s, PLAYOS_AXIS_RIGHT_Y, ev->value);
         }
-        /* Analog triggers are pedals, not buttons. ABS_Z is left trigger
-         * and ABS_RZ is right trigger on the ROG Ally / xpad mapping. */
-        else if (ev->code == ABS_Z) {
+        /* Analog triggers are pedals, not buttons. */
+        else if (ev->code == g_db_remap.abs_left_trigger) {
             s->controller.axes[PLAYOS_AXIS_LEFT_TRIGGER] =
                 shell_input_normalize_trigger(ev->value,
                                               s->trigger_lt_min,
                                               s->trigger_lt_max,
                                               s->trigger_lt_calibrated);
-        } else if (ev->code == ABS_RZ) {
+        } else if (ev->code == g_db_remap.abs_right_trigger) {
             s->controller.axes[PLAYOS_AXIS_RIGHT_TRIGGER] =
                 shell_input_normalize_trigger(ev->value,
                                               s->trigger_rt_min,
@@ -860,14 +913,16 @@ static int shell_input_process_event(struct playos_shell *s,
         }
         /* D-pad as ABS_HAT (xpad driver).
          * Mutually exclusive: LEFT clears RIGHT, UP clears DOWN. */
-        else if (ev->code == ABS_HAT0X) {
+        else if (g_db_remap.dpad_hat_x >= 0 &&
+                 ev->code == g_db_remap.dpad_hat_x) {
             s->controller.buttons &= ~(PLAYOS_BUTTON_DPAD_LEFT |
                                        PLAYOS_BUTTON_DPAD_RIGHT);
             if (ev->value < 0)
                 s->controller.buttons |= PLAYOS_BUTTON_DPAD_LEFT;
             else if (ev->value > 0)
                 s->controller.buttons |= PLAYOS_BUTTON_DPAD_RIGHT;
-        } else if (ev->code == ABS_HAT0Y) {
+        } else if (g_db_remap.dpad_hat_x >= 0 &&
+                   ev->code == g_db_remap.dpad_hat_x + 1) {
             s->controller.buttons &= ~(PLAYOS_BUTTON_DPAD_UP |
                                        PLAYOS_BUTTON_DPAD_DOWN);
             if (ev->value < 0)
@@ -889,8 +944,10 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
     if (fd < 0)
         return;
 
-    /* ROG Ally face-swap quirk applies to the gamepad node only. */
-    int face_swap = (s->gamepad_face_swap && name &&
+    /* ROG Ally face-swap quirk applies to the gamepad node only, and only
+     * when no SDL_GameControllerDB entry matched (the entry already encodes
+     * the correct X/Y). */
+    int face_swap = (s->gamepad_face_swap && !g_db_from && name &&
                      strcmp(name, "gamepad") == 0);
 
     /* Raw-code diagnostics for the reserved nodes only. The ROG Ally's
