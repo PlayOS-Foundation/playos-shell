@@ -52,6 +52,8 @@ struct playos_shell {
 
     /* ── Input (evdev — trusted, keeps SYSTEM/QUICK_MENU) ── */
     int  evdev_fd;             /* Main gamepad node (face buttons, sticks) */
+    int  gamepad_face_swap;    /* ROG Ally quirk: swap WEST<->NORTH on the
+                                  internal controller (X/Y wired rotated) */
     int  input_inotify_fd;     /* inotify watch on /dev/input (hotplug) */
     int  input_inotify_wd;     /* watch descriptor for /dev/input */
     struct shell_reserved_fd reserved_fds[SHELL_MAX_RESERVED_FDS];

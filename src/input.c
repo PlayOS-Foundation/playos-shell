@@ -90,6 +90,44 @@ static int is_gamepad_device(int fd)
     return 1;
 }
 
+/* ROG Ally built-in controller face-button quirk (Sprint 13 follow-up).
+ *
+ * The Ally's internal controller enumerates as a standard Xbox 360 pad
+ * (name "Microsoft X-Box 360 pad", VID 045e:028e) on the SoC's internal USB
+ * port (phys "usb-0000:09:00.3-2/input0"), but its face buttons are wired
+ * rotated: physical X reports BTN_NORTH and physical Y reports BTN_WEST.
+ * A and B are standard. Swap NORTH<->WEST only for that device so external
+ * Xbox pads on other ports keep the standard mapping. Env override:
+ * PLAYOS_ROG_ALLY_FACE_SWAP=1 forces the swap, =0 forces it off. */
+static int shell_input_rog_ally_face_swap(const char *name, const char *phys)
+{
+    const char *env = getenv("PLAYOS_ROG_ALLY_FACE_SWAP");
+    if (env && env[0]) {
+        if (env[0] == '1' || env[0] == 'y' || env[0] == 'Y')
+            return 1;
+        if (env[0] == '0' || env[0] == 'n' || env[0] == 'N')
+            return 0;
+    }
+    return strstr(name, "X-Box") != NULL &&
+           strncmp(phys, "usb-0000:09:00.3-2", 18) == 0;
+}
+
+static void shell_input_detect_face_swap(struct playos_shell *s)
+{
+    s->gamepad_face_swap = 0;
+    if (s->evdev_fd < 0)
+        return;
+
+    char name[256] = {0};
+    char phys[256] = {0};
+    ioctl(s->evdev_fd, EVIOCGNAME(sizeof(name) - 1), name);
+    ioctl(s->evdev_fd, EVIOCGPHYS(sizeof(phys) - 1), phys);
+
+    s->gamepad_face_swap = shell_input_rog_ally_face_swap(name, phys);
+    PLAYOS_LOG_I("input", "gamepad face-swap quirk %s (name='%s' phys='%s')",
+                 s->gamepad_face_swap ? "ON" : "off", name, phys);
+}
+
 static int find_gamepad_device(void)
 {
     PLAYOS_LOG_I("input", "scanning /dev/input/event* for gamepad...");
@@ -620,6 +658,8 @@ int shell_input_init(struct playos_shell *s)
         return -1;
     }
 
+    shell_input_detect_face_swap(s);
+
     memset(&s->controller, 0, sizeof(s->controller));
     memset(&s->controller_prev, 0, sizeof(s->controller_prev));
     s->buttons_pressed = 0;
@@ -671,7 +711,8 @@ static void shell_input_volume_adjust(struct playos_shell *s, float delta)
 /* Decode a single evdev event into shell state.
  * Returns 1 on EV_SYN (end of one kernel frame), 0 otherwise. */
 static int shell_input_process_event(struct playos_shell *s,
-                                     const struct input_event *ev)
+                                     const struct input_event *ev,
+                                     int face_swap)
 {
     switch (ev->type) {
     case EV_KEY:
@@ -684,10 +725,12 @@ static int shell_input_process_event(struct playos_shell *s,
             input_apply_button(s, PLAYOS_BUTTON_EAST, ev->value);
             break;
         case BTN_WEST:
-            input_apply_button(s, PLAYOS_BUTTON_WEST, ev->value);
+            input_apply_button(s, face_swap ? PLAYOS_BUTTON_NORTH
+                                            : PLAYOS_BUTTON_WEST, ev->value);
             break;
         case BTN_NORTH:
-            input_apply_button(s, PLAYOS_BUTTON_NORTH, ev->value);
+            input_apply_button(s, face_swap ? PLAYOS_BUTTON_WEST
+                                            : PLAYOS_BUTTON_NORTH, ev->value);
             break;
 
         /* ── Start / Select ── */
@@ -846,6 +889,10 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
     if (fd < 0)
         return;
 
+    /* ROG Ally face-swap quirk applies to the gamepad node only. */
+    int face_swap = (s->gamepad_face_swap && name &&
+                     strcmp(name, "gamepad") == 0);
+
     /* Raw-code diagnostics for the reserved nodes only. The ROG Ally's
      * Command Center / Armoury Crate buttons arrive as KEY_F16/F17/F18
      * rather than the PROG / TRIGGER_HAPPY codes the original discovery
@@ -908,7 +955,7 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
          * so limiting the drain to one EV_SYN batch left newer stick/trigger
          * values sitting in the kernel buffer until the next frame — that
          * coalescing backlog is what made the Live Input Test feel laggy. */
-        shell_input_process_event(s, &ev);
+        shell_input_process_event(s, &ev, face_swap);
     }
 }
 
@@ -938,6 +985,7 @@ void shell_input_poll(struct playos_shell *s)
             if (s->evdev_fd >= 0) {
                 PLAYOS_LOG_I("input", "gamepad appeared (inotify) fd=%d",
                              s->evdev_fd);
+                shell_input_detect_face_swap(s);
                 shell_input_read_trigger_calibration(s);
                 shell_input_read_stick_calibration(s);
             }
@@ -957,6 +1005,7 @@ void shell_input_poll(struct playos_shell *s)
             if (s->evdev_fd >= 0) {
                 PLAYOS_LOG_I("input", "gamepad appeared after retry (fd=%d)",
                              s->evdev_fd);
+                shell_input_detect_face_swap(s);
                 shell_input_read_trigger_calibration(s);
                 shell_input_read_stick_calibration(s);
             } else {
