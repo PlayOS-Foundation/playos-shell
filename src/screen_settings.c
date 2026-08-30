@@ -125,8 +125,11 @@ settings_content_height(const struct playos_shell *s, int tab)
         return 3.0f * info_h;
     case TAB_SYSTEM: {
         /* 5 info lines + gap + screenshot toggle row + 2 power rows +
-         * gap + 3 software-update rows (+ progress row while applying). */
+         * gap + 3 software-update rows (+ install row when present,
+         * + progress row while applying). */
         float h = 5.0f * info_h + 8.0f * row_h;
+        if (s->install_payload_present)
+            h += 2.0f * row_h;   /* gap + Install PlayOS row */
         if (s->update_in_progress)
             h += 3.0f * row_h;   /* gap + gauge line + step line */
         return h;
@@ -152,6 +155,29 @@ settings_clamp_content_scroll(struct playos_shell *s)
         max_scroll = 0.0f;
     s->settings_content_scroll =
         clampf(s->settings_content_scroll, 0.0f, max_scroll);
+}
+
+/* S13.7: keep the System-tab cursor row visible while navigating. The install
+ * row is the last item; without this it sits below the viewport forever. */
+static void
+settings_system_scroll_to_cursor(struct playos_shell *s)
+{
+    /* Row offsets in row-height units for System-tab cursors:
+     * 0=Screenshot, 1/2=Power, 3/4/5=Updates, 6=Install. */
+    static const float row_units[7] = {
+        48.0f, 56.0f, 64.0f, 72.0f, 80.0f, 88.0f, 96.0f
+    };
+    if (s->settings_power_cursor < 0 ||
+        s->settings_power_cursor >=
+            (int)(sizeof(row_units) / sizeof(row_units[0])))
+        return;
+
+    float label_scale = settings_label_scale(s);
+    float view_h = settings_viewport_height(s);
+    float cursor_y = row_units[s->settings_power_cursor] * label_scale;
+    float target = cursor_y - view_h * 0.25f;
+    s->settings_content_scroll = target < 0.0f ? 0.0f : target;
+    settings_clamp_content_scroll(s);
 }
 
 /* Adjust display brightness by delta percent, writing through the platform-api
@@ -269,6 +295,8 @@ screen_settings_enter(struct playos_shell *s)
     s->update_restart_confirm = false;
     s->install_confirm = false;
     s->install_payload_present = settings_install_payload_present();
+    if (s->install_payload_present)
+        shell_set_toast(s, "Install PlayOS available (System tab, scroll down)");
     shell_refresh_boot_slot(s);
 }
 
@@ -363,13 +391,17 @@ screen_settings_update(struct playos_shell *s)
          * 3 = Check for Update, 4 = Apply Update, 5 = Restart to Apply,
          * 6 = Install PlayOS (only when a payload is present). */
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
-            if (s->settings_power_cursor > 0)
+            if (s->settings_power_cursor > 0) {
                 s->settings_power_cursor--;
+                settings_system_scroll_to_cursor(s);
+            }
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
             int system_max = s->install_payload_present ? 6 : 5;
-            if (s->settings_power_cursor < system_max)
+            if (s->settings_power_cursor < system_max) {
                 s->settings_power_cursor++;
+                settings_system_scroll_to_cursor(s);
+            }
         }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
             switch (s->settings_power_cursor) {
