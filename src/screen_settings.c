@@ -265,21 +265,49 @@ settings_scan_update_bundle(struct playos_shell *s)
 static bool
 settings_install_payload_present(void)
 {
-    if (access("/dev/disk/by-label/playos-a", R_OK) != 0)
-        return false;
+    char dev[128] = {0};
 
-    if (mkdir("/mnt/playos-payload-check", 0755) != 0 && errno != EEXIST)
-        return false;
+    /* Prefer the by-label symlink; fall back to blkid if udev hasn't created
+     * the link in the live initramfs. */
+    if (access("/dev/disk/by-label/playos-a", R_OK) == 0) {
+        snprintf(dev, sizeof(dev), "/dev/disk/by-label/playos-a");
+    } else {
+        FILE *fp = popen("blkid -L playos-a 2>/dev/null | head -1", "r");
+        if (fp) {
+            if (fgets(dev, sizeof(dev), fp)) {
+                dev[strcspn(dev, "\r\n")] = '\0';
+            }
+            pclose(fp);
+        }
+    }
 
-    if (mount("/dev/disk/by-label/playos-a", "/mnt/playos-payload-check",
+    if (!dev[0]) {
+        PLAYOS_LOG_W("shell", "install payload: no playos-a device found "
+                     "(by-label missing, blkid empty)");
+        return false;
+    }
+    PLAYOS_LOG_I("shell", "install payload: found device %s", dev);
+
+    if (mkdir("/mnt/playos-payload-check", 0755) != 0 && errno != EEXIST) {
+        PLAYOS_LOG_W("shell", "install payload: mkdir failed: %s",
+                     strerror(errno));
+        return false;
+    }
+
+    if (mount(dev, "/mnt/playos-payload-check",
               "ext2", MS_RDONLY, NULL) != 0 &&
-        mount("/dev/disk/by-label/playos-a", "/mnt/playos-payload-check",
+        mount(dev, "/mnt/playos-payload-check",
               "ext4", MS_RDONLY, NULL) != 0) {
+        PLAYOS_LOG_W("shell", "install payload: mount %s failed: %s",
+                     dev, strerror(errno));
         return false;
     }
 
     bool ok = access("/mnt/playos-payload-check/rootfs.squashfs", R_OK) == 0 &&
               access("/mnt/playos-payload-check/BOOTX64.EFI", R_OK) == 0;
+    if (!ok)
+        PLAYOS_LOG_W("shell", "install payload: rootfs.squashfs/BOOTX64.EFI "
+                     "missing on %s", dev);
     umount("/mnt/playos-payload-check");
     return ok;
 }
