@@ -122,6 +122,6 @@ WAYLAND_DISPLAY=wayland-1 ./build/playos-shell
 The shell links against `playos-runtime`'s `trusted_control.h` (guarded by `PLAYOS_TRUSTED_IPC` preprocessor define). This provides:
 - `playos_trusted_connect()` / `playos_trusted_disconnect()` — connection lifecycle
 - `playos_trusted_shell_ready(int fd)` — fire-and-forget ShellReady notification (notifies init the shell is running)
-- `playos_trusted_launch_game()`, `playos_trusted_terminate_game()`, `playos_trusted_shutdown()`, `playos_trusted_reboot()` — future operations
+- `playos_trusted_launch_game()`, `playos_trusted_terminate_game()`, `playos_trusted_shutdown()`, `playos_trusted_reboot()`, `playos_trusted_start_installer()` — trusted operations (S13.7 adds the runtime installer handoff)
 
 The ShellReady message is sent once during startup, after EGL init and Wayland registration, using a temporary connection (connect → send → close). No response is expected.

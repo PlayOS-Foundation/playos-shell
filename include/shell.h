@@ -150,6 +150,8 @@ struct playos_shell {
     char   boot_slot_health[16];    /* active slot health, or "unknown" */
     char   boot_slot_version[64];   /* active slot version, or "unknown" */
     bool   update_restart_confirm;  /* "Restart to apply update?" modal active */
+    bool   install_payload_present; /* S13.7: playos-a payload found on boot medium */
+    bool   install_confirm;         /* "Install PlayOS to internal disk?" modal active */
 
     /* ── Transient toast (Sprint 11) ── */
     char   toast_msg[256];          /* message shown while toast_until active */
