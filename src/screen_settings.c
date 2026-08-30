@@ -21,6 +21,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <errno.h>
+#include <ctype.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -261,32 +262,101 @@ settings_scan_update_bundle(struct playos_shell *s)
 
 /* S13.7: detect the install payload on the boot medium. A live/installer USB
  * image carries rootfs.squashfs + BOOTX64.EFI on its playos-a partition; an
- * installed system has no such partition, so the Settings action is hidden. */
+ * installed system has no such partition, so the Settings action is hidden.
+ *
+ * The internal NVMe of a previously-installed PlayOS also carries a partition
+ * labeled playos-a (a raw squashfs slot), so we MUST only accept the payload
+ * when it lives on a removable disk — otherwise booting the USB while an
+ * installed system exists would resolve to the NVMe slot and hide the action. */
+
+static int
+settings_read_int_file(const char *path, int *out)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return -1;
+    int r = fscanf(f, "%d", out) == 1 ? 0 : -1;
+    fclose(f);
+    return r;
+}
+
+/* /dev/sda2 -> /dev/sda; /dev/nvme0n1p2 -> /dev/nvme0n1. */
+static void
+settings_strip_partition_suffix(const char *dev, char *out, size_t out_sz)
+{
+    size_t len = strlen(dev);
+    while (len > 0 && isdigit((unsigned char)dev[len - 1]))
+        len--;
+    if (len > 0 && dev[len - 1] == 'p')
+        len--;
+    if (len >= out_sz)
+        len = out_sz - 1;
+    memcpy(out, dev, len);
+    out[len] = '\0';
+}
+
+/* True when the given whole-disk sysfs name reports removable=1. */
+static int
+settings_disk_removable(const char *disk_name)
+{
+    char rb[192];
+    snprintf(rb, sizeof(rb), "/sys/block/%s/removable", disk_name);
+    int removable = 0;
+    return settings_read_int_file(rb, &removable) == 0 && removable == 1;
+}
+
 static bool
 settings_install_payload_present(void)
 {
     char dev[128] = {0};
 
-    /* Prefer the by-label symlink; fall back to blkid if udev hasn't created
-     * the link in the live initramfs. */
+    /* 1) Prefer /dev/disk/by-label/playos-a when it is on a removable disk. */
     if (access("/dev/disk/by-label/playos-a", R_OK) == 0) {
-        snprintf(dev, sizeof(dev), "/dev/disk/by-label/playos-a");
-    } else {
-        FILE *fp = popen("blkid -L playos-a 2>/dev/null | head -1", "r");
-        if (fp) {
-            if (fgets(dev, sizeof(dev), fp)) {
-                dev[strcspn(dev, "\r\n")] = '\0';
-            }
-            pclose(fp);
+        char resolved[256] = {0};
+        ssize_t rl = readlink("/dev/disk/by-label/playos-a", resolved,
+                              sizeof(resolved) - 1);
+        if (rl > 0) {
+            resolved[rl] = '\0';
+            const char *base = strrchr(resolved, '/');
+            base = base ? base + 1 : resolved;
+            char devtmp[256];
+            snprintf(devtmp, sizeof(devtmp), "/dev/%s", base);
+            char disk[128];
+            settings_strip_partition_suffix(devtmp, disk, sizeof(disk));
+            const char *dname = strrchr(disk, '/');
+            dname = dname ? dname + 1 : disk;
+            if (settings_disk_removable(dname))
+                snprintf(dev, sizeof(dev), "/dev/disk/by-label/playos-a");
         }
     }
 
+    /* 2) blkid fallback: accept a playos-a device only on a removable disk. */
     if (!dev[0]) {
-        PLAYOS_LOG_W("shell", "install payload: no playos-a device found "
-                     "(by-label missing, blkid empty)");
+        FILE *fp = popen("blkid -L playos-a 2>/dev/null", "r");
+        char line[128];
+        while (fp && fgets(line, sizeof(line), fp)) {
+            line[strcspn(line, "\r\n")] = '\0';
+            if (!line[0])
+                continue;
+            char disk[128];
+            settings_strip_partition_suffix(line, disk, sizeof(disk));
+            const char *dname = strrchr(disk, '/');
+            dname = dname ? dname + 1 : disk;
+            if (settings_disk_removable(dname)) {
+                snprintf(dev, sizeof(dev), "%s", line);
+                break;
+            }
+        }
+        if (fp)
+            pclose(fp);
+    }
+
+    if (!dev[0]) {
+        PLAYOS_LOG_W("shell", "install payload: no playos-a device found on "
+                     "a removable disk (NVMe slot ignored)");
         return false;
     }
-    PLAYOS_LOG_I("shell", "install payload: found device %s", dev);
+    PLAYOS_LOG_I("shell", "install payload: found removable device %s", dev);
 
     if (mkdir("/mnt/playos-payload-check", 0755) != 0 && errno != EEXIST) {
         PLAYOS_LOG_W("shell", "install payload: mkdir failed: %s",
