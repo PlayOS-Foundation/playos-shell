@@ -506,6 +506,7 @@ shell_switch_screen(struct playos_shell *s, enum playos_screen screen)
     case SCREEN_LIBRARY:     screen_library_enter(s);     break;
     case SCREEN_GAME_DETAIL: screen_game_detail_enter(s); break;
     case SCREEN_SETTINGS:    screen_settings_enter(s);    break;
+    case SCREEN_RECOVERY:    screen_recovery_enter(s);    break;
     }
 }
 
@@ -571,6 +572,11 @@ main(int argc, char *argv[])
     clock_gettime(CLOCK_MONOTONIC, &s->start_time);
     s->running = true;
     s->current_screen = SCREEN_HOME;
+    if (getenv("PLAYOS_RECOVERY")) {
+        s->recovery_mode = 1;
+        s->current_screen = SCREEN_RECOVERY;
+        screen_recovery_enter(s);
+    }
     s->output_width = 1920;
     s->output_height = 1080;
     s->dpi_scale = shell_detect_dpi_scale();
@@ -811,6 +817,7 @@ main(int argc, char *argv[])
         case SCREEN_LIBRARY:     screen_library_update(s);     break;
         case SCREEN_GAME_DETAIL: screen_game_detail_update(s); break;
         case SCREEN_SETTINGS:    screen_settings_update(s);    break;
+        case SCREEN_RECOVERY:    screen_recovery_update(s);    break;
         }
 
         /* Draw current screen — skip while suspended/backgrounded */
@@ -821,6 +828,7 @@ main(int argc, char *argv[])
             case SCREEN_LIBRARY:     screen_library_draw(s);     break;
             case SCREEN_GAME_DETAIL: screen_game_detail_draw(s); break;
             case SCREEN_SETTINGS:    screen_settings_draw(s);    break;
+            case SCREEN_RECOVERY:    screen_recovery_draw(s);    break;
             }
             if (s->power_info_valid)
                 shell_status_bar_draw(s);

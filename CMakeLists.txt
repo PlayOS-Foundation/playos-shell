@@ -130,6 +130,7 @@ set(SHELL_SOURCES
     src/screen_library.c
     src/screen_game_detail.c
     src/screen_settings.c
+    src/screen_recovery.c
     src/render_util.c
 )
 

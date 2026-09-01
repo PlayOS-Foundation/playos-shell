@@ -24,6 +24,7 @@ enum playos_screen {
     SCREEN_LIBRARY,
     SCREEN_GAME_DETAIL,
     SCREEN_SETTINGS,
+    SCREEN_RECOVERY,
 };
 
 /* ── Reserved-button evdev nodes ────────────────────────────────────────
@@ -125,6 +126,10 @@ struct playos_shell {
 
     /* ── Settings cursor ── */
     int    settings_tab;            /* active tab (see TAB_* enum in screen_settings.c) */
+    int    recovery_mode;           /* 1 = launched with PLAYOS_RECOVERY=1 */
+    int    recovery_cursor;         /* active recovery menu item */
+    int    recovery_confirm;        /* 1 = confirm modal active */
+    int    recovery_log_view;       /* 1 = showing /data/log file list */
     float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */
     float  settings_content_scroll; /* vertical content scroll offset (px) */
     /* ── Selectable rows (System tab) ── */
@@ -186,6 +191,11 @@ void screen_game_detail_draw(struct playos_shell *s);
 void screen_settings_enter(struct playos_shell *s);
 void screen_settings_update(struct playos_shell *s);
 void screen_settings_draw(struct playos_shell *s);
+
+/* S14-T6: recovery menu shown when launched with PLAYOS_RECOVERY=1. */
+void screen_recovery_enter(struct playos_shell *s);
+void screen_recovery_update(struct playos_shell *s);
+void screen_recovery_draw(struct playos_shell *s);
 
 /* ── Input (defined in input.c) ──────────────────────────────────────── */
 
