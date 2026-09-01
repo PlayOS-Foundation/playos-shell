@@ -6,6 +6,7 @@
  * repeated compositor failure). Provides: reboot, shutdown, factory reset,
  * rollback to the other A/B slot, and log viewing.
  */
+#define _DEFAULT_SOURCE 1
 #include "shell.h"
 #include "playos-runtime/trusted_control.h"
 #include "playos/playos_input.h"
