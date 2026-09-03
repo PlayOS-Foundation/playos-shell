@@ -77,18 +77,20 @@ recovery_rollback(struct playos_shell *s)
 static void
 recovery_draw_logs(struct playos_shell *s)
 {
-    float x = (float)s->output_width * 0.15f;
+    float w = (float)s->output_width;
+    float x = w * 0.12f;
     float y = 140.0f;
-    float scale = 20.0f;
+    float header_scale = 5.0f;
+    float entry_scale = 4.0f;
 
-    render_draw_text("System logs (/data/log)", x, 80.0f, 32.0f,
+    render_draw_text("System logs (/data/log)", x, 70.0f, header_scale,
                      1.0f, 1.0f, 1.0f, 1.0f);
-    render_draw_text("B: Back", x, 110.0f, 18.0f,
+    render_draw_text("B: Back", x, 105.0f, 2.5f,
                      0.6f, 0.6f, 0.6f, 1.0f);
 
     DIR *d = opendir("/data/log");
     if (!d) {
-        render_draw_text("No logs available", x, y, scale,
+        render_draw_text("No logs available", x, y, entry_scale,
                          0.8f, 0.4f, 0.4f, 1.0f);
         return;
     }
@@ -97,15 +99,16 @@ recovery_draw_logs(struct playos_shell *s)
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.')
             continue;
-        render_draw_text(e->d_name, x, y, scale, 0.85f, 0.85f, 0.85f, 1.0f);
-        y += scale * 1.6f;
+        render_draw_text(e->d_name, x, y, entry_scale,
+                         0.85f, 0.85f, 0.85f, 1.0f);
+        y += entry_scale * 9.0f;
         shown++;
         if (shown >= 16)
             break;
     }
     closedir(d);
     if (shown == 0)
-        render_draw_text("No logs available", x, y, scale,
+        render_draw_text("No logs available", x, y, entry_scale,
                          0.8f, 0.4f, 0.4f, 1.0f);
 }
 
@@ -177,30 +180,43 @@ screen_recovery_draw(struct playos_shell *s)
     float h = (float)s->output_height;
 
     if (s->recovery_confirm) {
-        render_draw_text("Factory Reset?", w * 0.5f - 180.0f, h * 0.4f, 40.0f,
+        float cs = 8.0f;
+        float hs = 3.0f;
+        float cw = render_text_width("Factory Reset?", cs);
+        float hw = render_text_width("A: Confirm   B: Cancel", hs);
+        render_draw_text("Factory Reset?", (w - cw) * 0.5f, h * 0.4f, cs,
                          1.0f, 1.0f, 1.0f, 1.0f);
-        render_draw_text("A: Confirm   B: Cancel", w * 0.5f - 200.0f,
-                         h * 0.4f + 60.0f, 24.0f, 0.8f, 0.5f, 0.5f, 1.0f);
+        render_draw_text("A: Confirm   B: Cancel", (w - hw) * 0.5f,
+                         h * 0.4f + cs * 8.0f, hs, 0.8f, 0.5f, 0.5f, 1.0f);
         return;
     }
 
-    render_draw_text("Recovery Mode", w * 0.5f - 120.0f, 80.0f, 44.0f,
-                     1.0f, 1.0f, 1.0f, 1.0f);
+    /* Title */
+    float title_scale = 9.0f;
+    float title_w = render_text_width("Recovery Mode", title_scale);
+    render_draw_text("Recovery Mode", (w - title_w) * 0.5f, 60.0f,
+                     title_scale, 1.0f, 1.0f, 1.0f, 1.0f);
 
-    float x = w * 0.5f - 160.0f;
-    float y = 200.0f;
-    float scale = 28.0f;
-
+    /* Menu items (shell text scale: actual px = scale * 7) */
+    float item_scale = 5.0f;
+    float item_step = item_scale * 11.0f;
+    float menu_top = h * 0.32f;
     for (int i = 0; i < RECOVERY_ITEMS; i++) {
         int sel = (i == s->recovery_cursor);
-        render_draw_text(recovery_items[i], x, y, scale,
-                         sel ? 1.0f : 0.6f,
-                         sel ? 0.9f : 0.6f,
-                         sel ? 0.4f : 0.6f,
+        const char *label = recovery_items[i];
+        float tw = render_text_width(label, item_scale);
+        render_draw_text(label, (w - tw) * 0.5f, menu_top + i * item_step,
+                         item_scale,
+                         sel ? 1.0f : 0.55f,
+                         sel ? 0.75f : 0.55f,
+                         sel ? 0.2f : 0.55f,
                          1.0f);
-        y += scale * 1.8f;
     }
 
-    render_draw_text("D-pad: Navigate   A: Select   B: Back", x, y + 20.0f,
-                     18.0f, 0.55f, 0.55f, 0.55f, 1.0f);
+    /* Footer hint */
+    float hint_scale = 2.5f;
+    const char *hint = "D-pad: Navigate   A: Select   B: Back";
+    float hint_w = render_text_width(hint, hint_scale);
+    render_draw_text(hint, (w - hint_w) * 0.5f, h - 80.0f, hint_scale,
+                     0.55f, 0.55f, 0.55f, 1.0f);
 }
