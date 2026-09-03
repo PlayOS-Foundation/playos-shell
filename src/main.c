@@ -666,8 +666,11 @@ main(int argc, char *argv[])
                      "running without trusted status");
     }
 
-    /* ── Enter home screen ── */
-    shell_switch_screen(s, SCREEN_HOME);
+    /* ── Enter initial screen (home, or recovery when requested) ── */
+    if (s->recovery_mode)
+        shell_switch_screen(s, SCREEN_RECOVERY);
+    else
+        shell_switch_screen(s, SCREEN_HOME);
 
     /* ── Signal handlers ── */
     signal(SIGTERM, handle_signal);
