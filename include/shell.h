@@ -130,6 +130,11 @@ struct playos_shell {
     int    recovery_cursor;         /* active recovery menu item */
     int    recovery_confirm;        /* 1 = confirm modal active */
     int    recovery_log_view;       /* 1 = showing /data/log file list */
+    int    recovery_log_cursor;     /* selected log file index */
+    int    recovery_log_content;    /* 1 = viewing a log file's contents */
+    int    recovery_log_count;      /* number of log files listed */
+    char   recovery_log_files[24][96];
+    char   recovery_log_path[256];  /* currently open log file */
     float  settings_tab_scroll;     /* horizontal tab-bar scroll offset (px) */
     float  settings_content_scroll; /* vertical content scroll offset (px) */
     /* ── Selectable rows (System tab) ── */

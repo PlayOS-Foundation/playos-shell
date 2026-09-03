@@ -19,6 +19,9 @@
 #include <sys/stat.h>
 
 #define RECOVERY_ITEMS 5
+#define RECOVERY_MAX_LOGS 24
+#define RECOVERY_CONTENT_LINES 16
+#define RECOVERY_CONTENT_LINE_LEN 200
 
 static const char *const recovery_items[RECOVERY_ITEMS] = {
     "Reboot",
@@ -27,6 +30,126 @@ static const char *const recovery_items[RECOVERY_ITEMS] = {
     "Rollback",
     "View Logs",
 };
+
+/* ── Log helpers ─────────────────────────────────────────────────────── */
+
+static void
+recovery_log_load(struct playos_shell *s)
+{
+    s->recovery_log_count = 0;
+    s->recovery_log_cursor = 0;
+    s->recovery_log_content = 0;
+
+    DIR *d = opendir("/data/log");
+    if (!d)
+        return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL && s->recovery_log_count < RECOVERY_MAX_LOGS) {
+        if (e->d_name[0] == '.')
+            continue;
+        snprintf(s->recovery_log_files[s->recovery_log_count],
+                 sizeof(s->recovery_log_files[0]), "%s", e->d_name);
+        s->recovery_log_count++;
+    }
+    closedir(d);
+}
+
+static void
+recovery_draw_log_list(struct playos_shell *s)
+{
+    float w = (float)s->output_width;
+    float x = w * 0.12f;
+    float y = 170.0f;
+    float header_scale = 5.0f;
+    float entry_scale = 4.0f;
+    float step = entry_scale * 10.0f;
+
+    render_draw_text("System logs (/data/log)", x, 60.0f, header_scale,
+                     1.0f, 1.0f, 1.0f, 1.0f);
+    render_draw_text("A: View   B: Back", x, 115.0f, 2.5f,
+                     0.6f, 0.6f, 0.6f, 1.0f);
+
+    if (s->recovery_log_count == 0) {
+        render_draw_text("No logs available", x, y, entry_scale,
+                         0.8f, 0.4f, 0.4f, 1.0f);
+        return;
+    }
+
+    for (int i = 0; i < s->recovery_log_count && i < 16; i++) {
+        int sel = (i == s->recovery_log_cursor);
+        render_draw_text(s->recovery_log_files[i], x, y, entry_scale,
+                         sel ? 1.0f : 0.6f,
+                         sel ? 0.8f : 0.6f,
+                         sel ? 0.3f : 0.6f,
+                         1.0f);
+        y += step;
+    }
+}
+
+static void
+recovery_draw_log_content(struct playos_shell *s)
+{
+    float x = 60.0f;
+    float y = 130.0f;
+    float scale = 3.0f;
+    float step = scale * 9.0f;
+
+    render_draw_text(s->recovery_log_path, x, 40.0f, 4.0f,
+                     1.0f, 1.0f, 1.0f, 1.0f);
+    render_draw_text("B: Back to list", x, 85.0f, 2.5f,
+                     0.6f, 0.6f, 0.6f, 1.0f);
+
+    FILE *f = fopen(s->recovery_log_path, "r");
+    if (!f) {
+        render_draw_text("Cannot open log", x, y, scale,
+                         0.8f, 0.4f, 0.4f, 1.0f);
+        return;
+    }
+
+    /* Read the tail (last 8KB) so big logs stay responsive. */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    long start = size > 8192 ? size - 8192 : 0;
+    fseek(f, start, SEEK_SET);
+    char buf[9000];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+
+    /* Keep the last RECOVERY_CONTENT_LINES lines. */
+    char lines[RECOVERY_CONTENT_LINES][RECOVERY_CONTENT_LINE_LEN];
+    int idx = 0, line_count = 0;
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, "\n", &save); tok;
+         tok = strtok_r(NULL, "\n", &save)) {
+        size_t len = strlen(tok);
+        if (len >= RECOVERY_CONTENT_LINE_LEN)
+            len = RECOVERY_CONTENT_LINE_LEN - 1;
+        memcpy(lines[idx], tok, len);
+        lines[idx][len] = '\0';
+        idx = (idx + 1) % RECOVERY_CONTENT_LINES;
+        if (line_count < RECOVERY_CONTENT_LINES)
+            line_count++;
+    }
+
+    int start_idx = line_count < RECOVERY_CONTENT_LINES ? 0 : idx;
+    for (int i = 0; i < line_count; i++) {
+        int pos = (start_idx + i) % RECOVERY_CONTENT_LINES;
+        render_draw_text(lines[pos], x, y, scale, 0.85f, 0.85f, 0.85f, 1.0f);
+        y += step;
+    }
+}
+
+static void
+recovery_draw_logs(struct playos_shell *s)
+{
+    if (s->recovery_log_content)
+        recovery_draw_log_content(s);
+    else
+        recovery_draw_log_list(s);
+}
+
+/* ── Rollback ────────────────────────────────────────────────────────── */
 
 static void
 recovery_rollback(struct playos_shell *s)
@@ -53,7 +176,6 @@ recovery_rollback(struct playos_shell *s)
         return;
     }
 
-    size_t from_len = strlen(from) > 0 && from[0] == '"' ? 18 : 0;
     /* Both "active_slot":"a" and "active_slot":"b" are 18 chars. */
     memcpy(from, to, 18);
 
@@ -74,43 +196,7 @@ recovery_rollback(struct playos_shell *s)
     playos_trusted_reboot(-1);
 }
 
-static void
-recovery_draw_logs(struct playos_shell *s)
-{
-    float w = (float)s->output_width;
-    float x = w * 0.12f;
-    float y = 140.0f;
-    float header_scale = 5.0f;
-    float entry_scale = 4.0f;
-
-    render_draw_text("System logs (/data/log)", x, 70.0f, header_scale,
-                     1.0f, 1.0f, 1.0f, 1.0f);
-    render_draw_text("B: Back", x, 105.0f, 2.5f,
-                     0.6f, 0.6f, 0.6f, 1.0f);
-
-    DIR *d = opendir("/data/log");
-    if (!d) {
-        render_draw_text("No logs available", x, y, entry_scale,
-                         0.8f, 0.4f, 0.4f, 1.0f);
-        return;
-    }
-    struct dirent *e;
-    int shown = 0;
-    while ((e = readdir(d)) != NULL) {
-        if (e->d_name[0] == '.')
-            continue;
-        render_draw_text(e->d_name, x, y, entry_scale,
-                         0.85f, 0.85f, 0.85f, 1.0f);
-        y += entry_scale * 9.0f;
-        shown++;
-        if (shown >= 16)
-            break;
-    }
-    closedir(d);
-    if (shown == 0)
-        render_draw_text("No logs available", x, y, entry_scale,
-                         0.8f, 0.4f, 0.4f, 1.0f);
-}
+/* ── Screen entry / update ───────────────────────────────────────────── */
 
 void
 screen_recovery_enter(struct playos_shell *s)
@@ -119,12 +205,35 @@ screen_recovery_enter(struct playos_shell *s)
     s->recovery_cursor = 0;
     s->recovery_confirm = 0;
     s->recovery_log_view = 0;
+    s->recovery_log_content = 0;
+    s->recovery_log_count = 0;
+    s->recovery_log_cursor = 0;
 }
 
 void
 screen_recovery_update(struct playos_shell *s)
 {
     if (s->recovery_log_view) {
+        if (s->recovery_log_content) {
+            if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST))
+                s->recovery_log_content = 0;
+            return;
+        }
+
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP) &&
+            s->recovery_log_cursor > 0)
+            s->recovery_log_cursor--;
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN) &&
+            s->recovery_log_cursor < s->recovery_log_count - 1)
+            s->recovery_log_cursor++;
+
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH) &&
+            s->recovery_log_count > 0) {
+            snprintf(s->recovery_log_path, sizeof(s->recovery_log_path),
+                     "/data/log/%s",
+                     s->recovery_log_files[s->recovery_log_cursor]);
+            s->recovery_log_content = 1;
+        }
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST))
             s->recovery_log_view = 0;
         return;
@@ -162,11 +271,14 @@ screen_recovery_update(struct playos_shell *s)
             recovery_rollback(s);
             break;
         case 4: /* View Logs */
+            recovery_log_load(s);
             s->recovery_log_view = 1;
             break;
         }
     }
 }
+
+/* ── Drawing ─────────────────────────────────────────────────────────── */
 
 void
 screen_recovery_draw(struct playos_shell *s)
