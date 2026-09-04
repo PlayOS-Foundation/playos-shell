@@ -814,13 +814,14 @@ main(int argc, char *argv[])
         }
 #endif
 
-        /* System button while a game is running opens the pause overlay
-         * (Sprint 14 T6/13-14). The shell reads reserved evdev directly even
-         * while suspended; the compositor has no libinput backend on DRM, so
-         * this is the reliable path: shell -> init -> compositor ShowOverlay. */
+        /* Command Center (COMMAND / QUICK_MENU) while a game is running opens
+         * the pause overlay (Sprint 14 T6/13-14). The shell reads reserved
+         * evdev directly even while suspended; the compositor has no libinput
+         * backend on DRM, so this is the reliable path: shell -> init ->
+         * compositor ShowOverlay. */
         if (s->game_running &&
-            shell_input_button_pressed(s, PLAYOS_BUTTON_SYSTEM)) {
-            PLAYOS_LOG_I("shell", "SYSTEM pressed in game - showing overlay");
+            shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU)) {
+            PLAYOS_LOG_I("shell", "COMMAND pressed in game - showing overlay");
             if (playos_trusted_show_overlay(-1) != 0)
                 PLAYOS_LOG_W("shell", "ShowOverlay failed");
         }
