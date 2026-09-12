@@ -242,6 +242,27 @@ shell_status_refresh(struct playos_shell *s)
     }
 }
 
+/* Append `suffix` to `buf` only when the result still fits both the buffer and
+ * the pixel budget. Used by the status bar, which must never overflow into the
+ * right-hand thermal chip. */
+static void
+status_try_append(char *buf, size_t bufsz, const char *suffix, float scale,
+                  float budget)
+{
+    size_t len = strlen(buf);
+    size_t add = strlen(suffix);
+    char probe[384];
+
+    if (len + add + 1 > bufsz || len + add + 1 > sizeof(probe))
+        return;
+
+    snprintf(probe, sizeof(probe), "%s%s", buf, suffix);
+    if (render_text_width(probe, scale) > budget)
+        return;
+
+    memcpy(buf + len, suffix, add + 1);
+}
+
 static void
 shell_status_bar_draw(struct playos_shell *s)
 {
@@ -303,17 +324,14 @@ shell_status_bar_draw(struct playos_shell *s)
     snprintf(left, sizeof(left), "%s", batt);
 
     if (temp[0]) {
-        char with_temp[256];
-        snprintf(with_temp, sizeof(with_temp), "%s    %s", left, temp);
-        if (render_text_width(with_temp, scale) <= left_budget)
-            snprintf(left, sizeof(left), "%s", with_temp);
+        char suffix[160];
+        snprintf(suffix, sizeof(suffix), "    %s", temp);
+        status_try_append(left, sizeof(left), suffix, scale, left_budget);
     }
     {
-        char with_profile[256];
-        snprintf(with_profile, sizeof(with_profile), "%s    Profile: %s",
-                 left, profile);
-        if (render_text_width(with_profile, scale) <= left_budget)
-            snprintf(left, sizeof(left), "%s", with_profile);
+        char suffix[160];
+        snprintf(suffix, sizeof(suffix), "    Profile: %s", profile);
+        status_try_append(left, sizeof(left), suffix, scale, left_budget);
     }
 
     /* Narrow output (or tiny bar): hard-truncate so it can never overlap. */
@@ -571,6 +589,7 @@ shell_switch_screen(struct playos_shell *s, enum playos_screen screen)
     case SCREEN_GAME_DETAIL: screen_game_detail_enter(s); break;
     case SCREEN_SETTINGS:    screen_settings_enter(s);    break;
     case SCREEN_RECOVERY:    screen_recovery_enter(s);    break;
+    case SCREEN_INSTALLER:   screen_installer_enter(s);   break;
     }
 }
 
@@ -927,6 +946,7 @@ main(int argc, char *argv[])
             case SCREEN_GAME_DETAIL: screen_game_detail_update(s); break;
             case SCREEN_SETTINGS:    screen_settings_update(s);    break;
             case SCREEN_RECOVERY:    screen_recovery_update(s);    break;
+            case SCREEN_INSTALLER:   screen_installer_update(s);   break;
             }
         }
 
@@ -939,6 +959,7 @@ main(int argc, char *argv[])
             case SCREEN_GAME_DETAIL: screen_game_detail_draw(s); break;
             case SCREEN_SETTINGS:    screen_settings_draw(s);    break;
             case SCREEN_RECOVERY:    screen_recovery_draw(s);    break;
+            case SCREEN_INSTALLER:   screen_installer_draw(s);     break;
             }
             if (s->power_info_valid)
                 shell_status_bar_draw(s);

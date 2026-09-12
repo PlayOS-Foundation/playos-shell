@@ -25,6 +25,7 @@ enum playos_screen {
     SCREEN_GAME_DETAIL,
     SCREEN_SETTINGS,
     SCREEN_RECOVERY,
+    SCREEN_INSTALLER,     /* S14-T10: app-style install front-end */
 };
 
 /* ── Reserved-button evdev nodes ────────────────────────────────────────
@@ -162,7 +163,18 @@ struct playos_shell {
     char   boot_slot_version[64];   /* active slot version, or "unknown" */
     bool   update_restart_confirm;  /* "Restart to apply update?" modal active */
     bool   install_payload_present; /* S13.7: playos-a payload found on boot medium */
-    bool   install_confirm;         /* "Install PlayOS to internal disk?" modal active */
+
+    /* ── Installer front-end (S14-T10) ──────────────────────────────────
+     * The shell shows the app-styled disk picker and the destructive confirm;
+     * init then hands the chosen disk to the installer (PLAYOS_INSTALL_TARGET)
+     * so the destructive phase starts without asking again. */
+#define SHELL_INSTALLER_MAX_DISKS 8
+    char   installer_path[SHELL_INSTALLER_MAX_DISKS][32];   /* /dev/nvme0n1 */
+    char   installer_label[SHELL_INSTALLER_MAX_DISKS][96];  /* model + size  */
+    int    installer_count;
+    int    installer_cursor;
+    bool   installer_confirm;       /* hold-A confirmation stage active */
+    double installer_hold_start;    /* elapsed_time the A hold began, 0 = idle */
 
     /* ── Transient toast (Sprint 11) ── */
     char   toast_msg[256];          /* message shown while toast_until active */
@@ -202,6 +214,12 @@ void screen_settings_draw(struct playos_shell *s);
 void screen_recovery_enter(struct playos_shell *s);
 void screen_recovery_update(struct playos_shell *s);
 void screen_recovery_draw(struct playos_shell *s);
+
+/* S14-T10: app-style installer front-end (disk picker + destructive confirm)
+ * launched from Settings, handing the chosen disk to the runtime installer. */
+void screen_installer_enter(struct playos_shell *s);
+void screen_installer_update(struct playos_shell *s);
+void screen_installer_draw(struct playos_shell *s);
 
 /* ── Full-output capture (defined in screencopy.c) ───────────────────── */
 

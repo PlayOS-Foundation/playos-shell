@@ -144,6 +144,7 @@ set(SHELL_SOURCES
     src/screen_game_detail.c
     src/screen_settings.c
     src/screen_recovery.c
+    src/screen_installer.c
     src/render_util.c
     src/screencopy.c
     ${GEN_DIR}/wlr-screencopy-unstable-v1-protocol.c

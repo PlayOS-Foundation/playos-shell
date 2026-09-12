@@ -391,7 +391,6 @@ screen_settings_enter(struct playos_shell *s)
     s->settings_power_cursor = 0;
     s->power_confirm = false;
     s->update_restart_confirm = false;
-    s->install_confirm = false;
     s->install_payload_present = settings_install_payload_present();
     if (s->install_payload_present)
         shell_set_toast(s, "Install PlayOS available (System tab, scroll down)");
@@ -416,23 +415,6 @@ screen_settings_update(struct playos_shell *s)
 #endif
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
             s->update_restart_confirm = false;
-        }
-        return;
-    }
-
-    /* ── Install-to-internal-disk confirmation modal (S13.7) ──────────── */
-    if (s->install_confirm) {
-        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
-#ifdef PLAYOS_TRUSTED_IPC
-            PLAYOS_LOG_I("shell", "settings: install to internal disk confirmed");
-            playos_trusted_start_installer(-1);
-#else
-            PLAYOS_LOG_W("shell", "settings: install requested "
-                         "(trusted IPC not available)");
-            s->install_confirm = false;
-#endif
-        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
-            s->install_confirm = false;
         }
         return;
     }
@@ -559,7 +541,10 @@ screen_settings_update(struct playos_shell *s)
                 break;
             case 6:
                 if (s->install_payload_present) {
-                    s->install_confirm = true;
+                    /* S14-T10: open the app-style installer front-end (disk
+                     * picker + hold-to-confirm) instead of a bare modal. */
+                    s->current_screen = SCREEN_INSTALLER;
+                    screen_installer_enter(s);
                     return;
                 }
                 shell_set_toast(s, "No install payload found");
@@ -1353,31 +1338,6 @@ screen_settings_draw(struct playos_shell *s)
         render_draw_text(action, ((float)w - action_w) * 0.5f,
                          (float)h * 0.40f, modal_scale,
                          1.0f, 1.0f, 1.0f, 1.0f);
-
-        const char *confirm_hint = "A: Confirm    B: Cancel";
-        float confirm_w = render_text_width(confirm_hint, modal_scale * 0.72f);
-        render_draw_text(confirm_hint, ((float)w - confirm_w) * 0.5f,
-                         (float)h * 0.52f, modal_scale * 0.72f,
-                         0.8f, 0.8f, 0.9f, 1.0f);
-    }
-
-    /* ── Install-to-internal-disk confirmation modal (S13.7) ── */
-    if (s->install_confirm) {
-        render_draw_rect(0.0f, 0.0f, (float)w, (float)h,
-                         0.0f, 0.0f, 0.0f, 0.7f);
-
-        float modal_scale = header_scale * 0.75f;
-        const char *title = "Install PlayOS to internal disk?";
-        float title_w = render_text_width(title, modal_scale);
-        render_draw_text(title, ((float)w - title_w) * 0.5f,
-                         (float)h * 0.40f, modal_scale,
-                         1.0f, 1.0f, 1.0f, 1.0f);
-
-        const char *warn = "This will erase the internal disk";
-        float warn_w = render_text_width(warn, modal_scale * 0.55f);
-        render_draw_text(warn, ((float)w - warn_w) * 0.5f,
-                         (float)h * 0.46f, modal_scale * 0.55f,
-                         0.84f, 0.42f, 0.0f, 1.0f);
 
         const char *confirm_hint = "A: Confirm    B: Cancel";
         float confirm_w = render_text_width(confirm_hint, modal_scale * 0.72f);
