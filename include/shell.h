@@ -143,7 +143,7 @@ struct playos_shell {
                                        5 = Restart to Apply */
     bool   power_confirm;           /* confirmation dialog active */
 
-    /* ── Screenshot (COMMAND / ARMOURY CRATE reserved buttons) ── */
+    /* ── Screenshot (COMMAND reserved button) ── */
     bool   screenshot_enabled;      /* capture on reserved button when true */
     bool   screenshot_pending;      /* one-frame request to capture */
     bool   screenshot_ok;           /* last capture result */
