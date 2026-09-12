@@ -169,7 +169,7 @@ struct playos_shell {
      * init then hands the chosen disk to the installer (PLAYOS_INSTALL_TARGET)
      * so the destructive phase starts without asking again. */
 #define SHELL_INSTALLER_MAX_DISKS 8
-    char   installer_path[SHELL_INSTALLER_MAX_DISKS][32];   /* /dev/nvme0n1 */
+    char   installer_path[SHELL_INSTALLER_MAX_DISKS][80];   /* /dev/nvme0n1 */
     char   installer_label[SHELL_INSTALLER_MAX_DISKS][96];  /* model + size  */
     int    installer_count;
     int    installer_cursor;
