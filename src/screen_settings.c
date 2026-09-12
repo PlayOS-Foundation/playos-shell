@@ -358,27 +358,34 @@ settings_install_payload_present(void)
     }
     PLAYOS_LOG_I("shell", "install payload: found removable device %s", dev);
 
-    if (mkdir("/mnt/playos-payload-check", 0755) != 0 && errno != EEXIST) {
-        PLAYOS_LOG_W("shell", "install payload: mkdir failed: %s",
+    /* Mount under /run, never /mnt: on an installed system / is a read-only
+     * squashfs, and mkdir("/mnt/...") fails there with EROFS. That made the
+     * install option vanish whenever the shell ran from an installed root (for
+     * example when a USB boot had wrongly pivoted into the installed slot). */
+    const char *mnt = "/run/playos-payload-check";
+    if (mkdir(mnt, 0755) != 0 && errno != EEXIST) {
+        PLAYOS_LOG_W("shell", "install payload: mkdir %s failed: %s", mnt,
                      strerror(errno));
         return false;
     }
 
-    if (mount(dev, "/mnt/playos-payload-check",
-              "ext2", MS_RDONLY, NULL) != 0 &&
-        mount(dev, "/mnt/playos-payload-check",
-              "ext4", MS_RDONLY, NULL) != 0) {
+    if (mount(dev, mnt, "ext2", MS_RDONLY, NULL) != 0 &&
+        mount(dev, mnt, "ext4", MS_RDONLY, NULL) != 0) {
         PLAYOS_LOG_W("shell", "install payload: mount %s failed: %s",
                      dev, strerror(errno));
         return false;
     }
 
-    bool ok = access("/mnt/playos-payload-check/rootfs.squashfs", R_OK) == 0 &&
-              access("/mnt/playos-payload-check/BOOTX64.EFI", R_OK) == 0;
+    char squashfs[128];
+    char efi[128];
+    snprintf(squashfs, sizeof(squashfs), "%s/rootfs.squashfs", mnt);
+    snprintf(efi, sizeof(efi), "%s/BOOTX64.EFI", mnt);
+
+    bool ok = access(squashfs, R_OK) == 0 && access(efi, R_OK) == 0;
     if (!ok)
         PLAYOS_LOG_W("shell", "install payload: rootfs.squashfs/BOOTX64.EFI "
                      "missing on %s", dev);
-    umount("/mnt/playos-payload-check");
+    umount(mnt);
     return ok;
 }
 
