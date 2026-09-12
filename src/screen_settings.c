@@ -805,9 +805,11 @@ draw_toggle_switch(float cx, float cy, float scale, bool on)
                        1.0f);
 }
 
-/* Selectable System-tab row: "Screenshot on COMMAND" label plus the toggle.
+/* Selectable System-tab row: "Screenshot on ARMOURY" label plus the toggle.
  * Pressing A on this row flips screenshot_enabled rather than opening the
- * power confirmation modal. */
+ * power confirmation modal. The toggle governs both reserved screenshot
+ * buttons: ARMOURY CRATE (anywhere, including in game) and COMMAND (shell UI
+ * only, since COMMAND opens the pause overlay in game). */
 static void
 draw_screenshot_toggle_row(struct playos_shell *s, float x, float *y,
                            float scale, bool selected)
@@ -820,7 +822,7 @@ draw_screenshot_toggle_row(struct playos_shell *s, float x, float *y,
         render_draw_rect(x, *y - scale * 0.5f, row_w, row_h,
                          0.84f, 0.42f, 0.0f, 0.9f);
 
-    render_draw_text("Screenshot on COMMAND", x, *y - scale * 0.5f, scale,
+    render_draw_text("Screenshot on ARMOURY", x, *y - scale * 0.5f, scale,
                      selected ? 1.0f : 0.6f,
                      selected ? 1.0f : 0.6f,
                      selected ? 1.0f : 0.6f,

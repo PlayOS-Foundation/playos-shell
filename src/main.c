@@ -733,44 +733,41 @@ main(int argc, char *argv[])
          * shell_input_poll() on one fresh frame (no Raylib one-frame lag). */
         shell_input_poll(s);
 
-        /* COMMAND gesture (Sprint 14):
-         *   - a game is running: tap = pause overlay, hold >= 700ms = screenshot
-         *   - shell UI:         press = screenshot (there is no overlay to open)
-         * The capture goes through wlr-screencopy, so it contains the real
-         * composited frame and works while a game or the overlay is on screen. */
+        /* Button gestures (Sprint 14).
+         *
+         *   COMMAND (Command Center):  in game -> pause overlay
+         *                              shell UI -> screenshot
+         *   ARMOURY CRATE (SYSTEM):     screenshot, in game or on the shell UI
+         *
+         * Both are EDGE triggered. The Ally's Command Center button is a
+         * momentary "tap": hid-asus emits KEY_F16 press+release within the same
+         * poll (verified on hardware), so no sustained state exists and a hold
+         * gesture is impossible. shell_input_button_pressed() also catches a
+         * press+release that lands inside a single poll.
+         *
+         * Captures run regardless of is_suspended: wlr-screencopy does not need
+         * the shell surface to be visible, so this works mid-game. */
         {
-            int cmd_down = shell_input_button_held(s, PLAYOS_BUTTON_QUICK_MENU);
-
-            if (cmd_down && !s->command_held) {
-                s->command_held = true;
-                s->command_hold_start = s->elapsed_time;
-                s->command_shot_fired = false;
-            }
-
-            if (cmd_down && s->command_held && !s->command_shot_fired &&
-                s->screenshot_enabled &&
-                (s->elapsed_time - s->command_hold_start) * 1000.0 >=
-                    SHELL_COMMAND_HOLD_MS) {
-                s->command_shot_fired = true;
+            if (s->screenshot_enabled && s->elapsed_time >= s->screenshot_debounce_until &&
+                shell_input_button_pressed(s, PLAYOS_BUTTON_SYSTEM)) {
+                PLAYOS_LOG_I("shell", "screenshot requested (ARMOURY CRATE)");
+                s->screenshot_debounce_until = s->elapsed_time + 0.4;
                 s->screenshot_pending = true;
             }
 
-            if (!cmd_down && s->command_held) {
-                s->command_held = false;
-                if (!s->command_shot_fired) {
-                    if (s->game_running) {
-                        PLAYOS_LOG_I("shell", "COMMAND tap - showing overlay");
-                        if (playos_trusted_show_overlay(-1) != 0)
-                            PLAYOS_LOG_W("shell", "ShowOverlay failed");
-                    } else if (s->screenshot_enabled) {
-                        s->screenshot_pending = true;
-                    }
+            if (shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU)) {
+                if (s->game_running) {
+                    PLAYOS_LOG_I("shell", "COMMAND tap - showing overlay");
+                    if (playos_trusted_show_overlay(-1) != 0)
+                        PLAYOS_LOG_W("shell", "ShowOverlay failed");
+                } else if (s->screenshot_enabled &&
+                           s->elapsed_time >= s->screenshot_debounce_until) {
+                    PLAYOS_LOG_I("shell", "screenshot requested (COMMAND)");
+                    s->screenshot_debounce_until = s->elapsed_time + 0.4;
+                    s->screenshot_pending = true;
                 }
-                s->command_shot_fired = false;
             }
 
-            /* Captures run regardless of is_suspended: screencopy does not
-             * need the shell surface to be visible. */
             if (s->screenshot_pending) {
                 shell_take_screenshot(s);
                 s->screenshot_pending = false;

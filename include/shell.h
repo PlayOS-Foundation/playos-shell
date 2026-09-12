@@ -143,14 +143,12 @@ struct playos_shell {
                                        5 = Restart to Apply */
     bool   power_confirm;           /* confirmation dialog active */
 
-    /* ── Screenshot (System tab, COMMAND reserved button) ── */
-    bool   screenshot_enabled;      /* capture on COMMAND when true */
+    /* ── Screenshot (COMMAND / ARMOURY CRATE reserved buttons) ── */
+    bool   screenshot_enabled;      /* capture on reserved button when true */
     bool   screenshot_pending;      /* one-frame request to capture */
     bool   screenshot_ok;           /* last capture result */
     double screenshot_flash_until;  /* elapsed_time until toast hides */
-    bool   command_held;            /* COMMAND is currently down */
-    double command_hold_start;      /* elapsed_time of the press edge */
-    bool   command_shot_fired;      /* hold threshold already triggered */
+    double screenshot_debounce_until; /* ignore repeat presses until then */
 
     /* ── Software update (Sprint 11) ── */
     char   update_bundle_path[512]; /* selected *.playosb from /data/updates */
@@ -213,12 +211,9 @@ void screen_recovery_draw(struct playos_shell *s);
  * back to a shell-surface grab. */
 int shell_capture_output(const char *path);
 
-/* Persisted "screenshot on COMMAND" preference (defined in main.c). */
+/* Persisted "screenshot buttons" preference (defined in main.c). */
 void shell_screenshot_setting_load(struct playos_shell *s);
 void shell_screenshot_setting_save(const struct playos_shell *s);
-
-/* Tap vs hold threshold for the COMMAND button (milliseconds). */
-#define SHELL_COMMAND_HOLD_MS 700
 
 /* ── Input (defined in input.c) ──────────────────────────────────────── */
 
