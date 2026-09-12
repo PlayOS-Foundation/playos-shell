@@ -286,14 +286,42 @@ shell_status_bar_draw(struct playos_shell *s)
     if (text_y < y)
         text_y = y + scale;
 
-    char left[256];
-    int n = snprintf(left, sizeof(left), "%s", batt);
-    if (temp[0] && n >= 0 && n < (int)sizeof(left))
-        n += snprintf(left + n, sizeof(left) - (size_t)n, "    %s", temp);
-    if (n >= 0 && n < (int)sizeof(left))
-        snprintf(left + n, sizeof(left) - (size_t)n, "    Profile: %s", profile);
+    /* Lay the bar out right-to-left: the thermal chip is fixed, so the
+     * left-hand summary must fit in what is left over. It used to be drawn
+     * unconditionally and overlapped the chip — "Profile: Balanced" and
+     * "Thermal: Normal" rendered as "…BALANCEDTHERMAL…". Segments are added
+     * most-important-first and only kept if they still fit. */
+    char thermal_text[64];
+    snprintf(thermal_text, sizeof(thermal_text), "Thermal: %s", thermal);
+    float thermal_w = render_text_width(thermal_text, scale);
+    float thermal_x = (float)w - thermal_w - (float)w * 0.03f;
 
-    float left_x = (float)w * 0.03f;
+    float left_x     = (float)w * 0.03f;
+    float left_budget = thermal_x - left_x - (float)w * 0.02f;  /* keep a gap */
+
+    char left[256];
+    snprintf(left, sizeof(left), "%s", batt);
+
+    if (temp[0]) {
+        char with_temp[256];
+        snprintf(with_temp, sizeof(with_temp), "%s    %s", left, temp);
+        if (render_text_width(with_temp, scale) <= left_budget)
+            snprintf(left, sizeof(left), "%s", with_temp);
+    }
+    {
+        char with_profile[256];
+        snprintf(with_profile, sizeof(with_profile), "%s    Profile: %s",
+                 left, profile);
+        if (render_text_width(with_profile, scale) <= left_budget)
+            snprintf(left, sizeof(left), "%s", with_profile);
+    }
+
+    /* Narrow output (or tiny bar): hard-truncate so it can never overlap. */
+    for (size_t len = strlen(left); len > 1 &&
+         render_text_width(left, scale) > left_budget; ) {
+        left[--len] = '\0';
+    }
+
     render_draw_text(left, left_x, text_y, scale, 0.85f, 0.85f, 0.9f, 1.0f);
 
     /* Thermal state on the right, colour-coded. */
@@ -306,11 +334,8 @@ shell_status_bar_draw(struct playos_shell *s)
         tr = 1.00f; tg = 0.25f; tb = 0.25f;
     }
 
-    char thermal_text[64];
-    snprintf(thermal_text, sizeof(thermal_text), "Thermal: %s", thermal);
-    float thermal_w = render_text_width(thermal_text, scale);
-    render_draw_text(thermal_text, (float)w - thermal_w - (float)w * 0.03f,
-                     text_y, scale, tr, tg, tb, 1.0f);
+    /* Right-hand chip, positioned above so the left summary could be budgeted. */
+    render_draw_text(thermal_text, thermal_x, text_y, scale, tr, tg, tb, 1.0f);
 }
 
 /* ── Screenshot capture (COMMAND reserved button) ─────────────────────────
