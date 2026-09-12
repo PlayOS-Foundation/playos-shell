@@ -16,7 +16,6 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 #define RECOVERY_ITEMS 5
 #define RECOVERY_MAX_LOGS 24
@@ -154,46 +153,20 @@ recovery_draw_logs(struct playos_shell *s)
 static void
 recovery_rollback(struct playos_shell *s)
 {
-    const char *path = "/EFI/playos/boot.json";
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        shell_set_toast(s, "boot.json not found");
-        return;
-    }
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    buf[n] = '\0';
-    fclose(f);
-
-    char *from = strstr(buf, "\"active_slot\":\"a\"");
-    char *to = "\"active_slot\":\"b\"";
-    if (!from) {
-        from = strstr(buf, "\"active_slot\":\"b\"");
-        to = "\"active_slot\":\"a\"";
-    }
-    if (!from) {
-        shell_set_toast(s, "active_slot not found in boot.json");
+    /* A/B slot metadata is owned by playos-init (boot_slot.c), which applies
+     * the real rollback semantics: the current slot is marked bad, the target
+     * slot becomes pending, and its boot count is reset. The shell previously
+     * rewrote /EFI/playos/boot.json itself; that edit wrote one byte too many
+     * and clobbered the value's trailing comma, which corrupted the file so
+     * init could not parse it — making the rollback a silent no-op. */
+    if (playos_trusted_rollback_slot(-1) != 0) {
+        shell_set_toast(s, "Rollback failed");
         return;
     }
 
-    /* Both "active_slot":"a" and "active_slot":"b" are 18 chars. */
-    memcpy(from, to, 18);
-
-    char tmp[64];
-    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    FILE *out = fopen(tmp, "w");
-    if (!out) {
-        shell_set_toast(s, "cannot write boot.json");
-        return;
-    }
-    fwrite(buf, 1, n, out);
-    fclose(out);
-    chmod(tmp, 0600);
-    rename(tmp, path);
-
-    shell_set_toast(s, "Rolled back — rebooting");
+    /* init reboots the system on success; this toast just covers the gap. */
+    shell_set_toast(s, "Rolling back — rebooting");
     usleep(500000);
-    playos_trusted_reboot(-1);
 }
 
 /* ── Screen entry / update ───────────────────────────────────────────── */
