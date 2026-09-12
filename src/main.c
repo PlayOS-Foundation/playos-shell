@@ -890,13 +890,23 @@ main(int argc, char *argv[])
         }
 #endif
 
-        /* Update current screen */
-        switch (s->current_screen) {
-        case SCREEN_HOME:        screen_home_update(s);        break;
-        case SCREEN_LIBRARY:     screen_library_update(s);     break;
-        case SCREEN_GAME_DETAIL: screen_game_detail_update(s); break;
-        case SCREEN_SETTINGS:    screen_settings_update(s);    break;
-        case SCREEN_RECOVERY:    screen_recovery_update(s);    break;
+        /* Update the current screen — but never while a game owns the screen.
+         *
+         * The shell stays suspended (not drawing) while a game is foreground,
+         * yet these update handlers kept running and reacting to gamepad input.
+         * The game-detail screen's B handler ("back to library") terminates a
+         * running game, so pressing B during gameplay killed the game and
+         * dropped the user back to the shell — it looked like the game quitting
+         * on B. While suspended the shell's UI must be inert; only the
+         * reserved-button gestures above and the volume keys may act. */
+        if (!s->is_suspended) {
+            switch (s->current_screen) {
+            case SCREEN_HOME:        screen_home_update(s);        break;
+            case SCREEN_LIBRARY:     screen_library_update(s);     break;
+            case SCREEN_GAME_DETAIL: screen_game_detail_update(s); break;
+            case SCREEN_SETTINGS:    screen_settings_update(s);    break;
+            case SCREEN_RECOVERY:    screen_recovery_update(s);    break;
+            }
         }
 
         /* Draw current screen — skip while suspended/backgrounded */

@@ -33,6 +33,12 @@ screen_game_detail_enter(struct playos_shell *s)
 void
 screen_game_detail_update(struct playos_shell *s)
 {
+    /* Defensive: this screen must never act on input while a game owns the
+     * screen. The main loop already skips screen updates when suspended, but B
+     * here terminates a running game, so the guard is repeated locally. */
+    if (s->is_suspended)
+        return;
+
     /* A: Launch */
     if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
         const char *game_id = s->game_ids[s->selected_game_index];
