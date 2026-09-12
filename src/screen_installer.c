@@ -277,6 +277,11 @@ screen_installer_update(struct playos_shell *s)
 void
 screen_installer_draw(struct playos_shell *s)
 {
+    /* Every screen owns a full-frame clear: the shell's renderer keeps the
+     * previous frame's pixels, so without this the Settings screen stayed
+     * visible underneath and the two overlapped (seen on hardware). */
+    render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
+
     float w = (float)s->output_width;
     float h = (float)s->output_height;
 
@@ -295,7 +300,8 @@ screen_installer_draw(struct playos_shell *s)
         const char *hint = "B: Back";
         float hs = 2.5f;
         float hw = render_text_width(hint, hs);
-        render_draw_text(hint, (w - hw) * 0.5f, h - 80.0f, hs,
+        render_draw_text(hint, (w - hw) * 0.5f,
+                         h - hs * 45.0f, hs,
                          0.55f, 0.55f, 0.55f, 1.0f);
         return;
     }
@@ -345,7 +351,8 @@ screen_installer_draw(struct playos_shell *s)
             const char *hint = "B: Cancel";
             float hs = 2.5f;
             x = (w - render_text_width(hint, hs)) * 0.5f;
-            render_draw_text(hint, x, h - 80.0f, hs, 0.55f, 0.55f, 0.55f, 1.0f);
+            render_draw_text(hint, x, h - hs * 45.0f, hs,
+                             0.55f, 0.55f, 0.55f, 1.0f);
         }
         return;
     }
@@ -391,6 +398,7 @@ screen_installer_draw(struct playos_shell *s)
         const char *hint = "D-pad: Select   A: Continue   B: Back";
         float hs = 2.5f;
         float x = (w - render_text_width(hint, hs)) * 0.5f;
-        render_draw_text(hint, x, h - 80.0f, hs, 0.55f, 0.55f, 0.55f, 1.0f);
+        render_draw_text(hint, x, h - hs * 45.0f, hs,
+                             0.55f, 0.55f, 0.55f, 1.0f);
     }
 }

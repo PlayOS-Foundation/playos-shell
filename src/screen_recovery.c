@@ -256,6 +256,10 @@ screen_recovery_update(struct playos_shell *s)
 void
 screen_recovery_draw(struct playos_shell *s)
 {
+    /* A screen always clears the frame first (same class of bug as the
+     * installer screen): the renderer keeps the previous frame's pixels. */
+    render_begin_frame(0.06f, 0.12f, 0.22f, 1.0f);
+
     if (s->recovery_log_view) {
         recovery_draw_logs(s);
         return;
