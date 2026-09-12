@@ -608,17 +608,30 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
         total_w += tab_widths[i];
     }
 
-    /* Left/right margin so the strip can breathe when it overflows. */
-    float margin = scale * 6.0f;
-    float view_w = (float)w - margin * 2.0f;
+    /* The strip spans the same column as the content below it and splits it
+     * into equal segments, so it reads as a toolbar rather than a floating
+     * pill inset from everything else. */
+    float strip_x = (float)w * 0.15f;
+    float view_w  = (float)w - strip_x * 2.0f;
+    if (view_w < scale * 40.0f) {          /* tiny output: fall back */
+        strip_x = scale * 6.0f;
+        view_w  = (float)w - strip_x * 2.0f;
+    }
 
     float draw_x;
     bool clipped = false;
 
     if (total_w <= view_w) {
-        /* Everything fits: center the strip, no scroll. */
+        /* Everything fits: equal segments across the column, no scroll. */
         s->settings_tab_scroll = 0.0f;
-        draw_x = ((float)w - total_w) * 0.5f;
+        float seg_w = view_w / (float)TAB_COUNT;
+        for (int i = 0; i < TAB_COUNT; i++)
+            tab_widths[i] = seg_w;
+        draw_x = strip_x;
+
+        /* Track behind the segments, so unselected tabs read as one control. */
+        render_draw_rect(strip_x, y - scale * 0.5f, view_w, scale * 7.0f,
+                         0.10f, 0.16f, 0.30f, 0.55f);
     } else {
         /* Overflow: keep the active tab centered, clamped to the ends. */
         float active_x = 0.0f;
@@ -632,20 +645,23 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
         /* Ease toward the target for a smooth cross-bar feel. */
         s->settings_tab_scroll += (target - s->settings_tab_scroll) * 0.25f;
 
-        draw_x = margin - s->settings_tab_scroll;
+        draw_x = strip_x - s->settings_tab_scroll;
         clipped = true;
+
+        render_draw_rect(strip_x, y - scale * 0.5f, view_w, scale * 7.0f,
+                         0.10f, 0.16f, 0.30f, 0.55f);
     }
 
     if (clipped)
-        render_begin_scissor((int)margin, (int)(y - scale * 1.0f),
+        render_begin_scissor((int)strip_x, (int)(y - scale * 1.0f),
                              (int)view_w, (int)(scale * 10.0f));
 
     for (int i = 0; i < TAB_COUNT; i++) {
         int is_active = (i == s->settings_tab);
 
         /* Skip tabs fully outside the clipped viewport. */
-        if (draw_x + tab_widths[i] < margin - 1.0f ||
-            draw_x > (float)w - margin + 1.0f) {
+        if (draw_x + tab_widths[i] < strip_x - 1.0f ||
+            draw_x > strip_x + view_w + 1.0f) {
             draw_x += tab_widths[i];
             continue;
         }
@@ -661,16 +677,15 @@ draw_tab_bar(struct playos_shell *s, float y, float scale)
                              0.12f, 0.20f, 0.35f, 0.6f);
         }
 
-        /* Tab label — vertically centered inside the 7*scale-tall tab
-         * background. DrawTextEx treats position.y as the top of the text,
-         * and the text height is 7*scale, so its top aligns with the
-         * background's top (y - 0.5*scale). */
-        float label_x = draw_x + tab_padding;
+        /* Tab label — centered in the segment (pad/2 for natural widths),
+         * vertically centered inside the 7*scale-tall background. */
+        float label_w = render_text_width(tab_names[i], scale);
+        float label_x = draw_x + (tab_widths[i] - label_w) * 0.5f;
         float label_y = y - scale * 0.5f;
         render_draw_text(tab_names[i], label_x, label_y, scale,
-                         is_active ? 1.0f : 0.6f,
-                         is_active ? 1.0f : 0.6f,
-                         is_active ? 1.0f : 0.6f,
+                         is_active ? 1.0f : 0.7f,
+                         is_active ? 1.0f : 0.7f,
+                         is_active ? 1.0f : 0.7f,
                          1.0f);
 
         draw_x += tab_widths[i];
@@ -697,7 +712,9 @@ draw_info_line(struct playos_shell *s, const char *label, const char *value,
                          value_scale, 0.9f, 0.9f, 0.9f, 1.0f);
     }
 
-    *y += label_scale * 16.0f;
+    /* One rhythm with the action rows below (they advance by 8*scale);
+     * 16*scale made the info block twice as airy as everything else. */
+    *y += label_scale * 10.0f;
 }
 
 /* ── Input test widget ────────────────────────────────────────────────── */
@@ -1063,6 +1080,21 @@ draw_input_test_widget(struct playos_shell *s, float x, float *y, float scale)
     *y += row_h;
 }
 
+/* Right-aligned chevron for rows that open something (a confirmation, the
+ * disk picker, an update check). Fills the otherwise empty right-hand side of
+ * the full-width selection bar. */
+static void
+draw_row_chevron(float right_x, float y, float scale, bool selected)
+{
+    const char *chev = ">";
+    float cw = render_text_width(chev, scale);
+    render_draw_text(chev, right_x - cw - scale * 2.0f, y, scale,
+                     selected ? 1.0f : 0.45f,
+                     selected ? 1.0f : 0.45f,
+                     selected ? 1.0f : 0.5f,
+                     1.0f);
+}
+
 /* ── Draw ──────────────────────────────────────────────────────────────── */
 
 void
@@ -1228,10 +1260,13 @@ screen_settings_draw(struct playos_shell *s)
                 render_draw_text(power_labels[i], content_x,
                                  content_y - label_scale * 0.5f,
                                  label_scale,
-                                 sel ? 1.0f : 0.6f,
-                                 sel ? 1.0f : 0.6f,
-                                 sel ? 1.0f : 0.6f,
+                                 sel ? 1.0f : 0.7f,
+                                 sel ? 1.0f : 0.7f,
+                                 sel ? 1.0f : 0.7f,
                                  1.0f);
+                draw_row_chevron((float)w - content_x,
+                                 content_y - label_scale * 0.5f,
+                                 label_scale, sel);
                 content_y += label_scale * 8.0f;
             }
 
@@ -1244,7 +1279,7 @@ screen_settings_draw(struct playos_shell *s)
                 int cursor = 3 + i;
                 bool sel = (cursor == s->settings_power_cursor);
                 bool disabled = (cursor == 5 && !s->update_ready);
-                float dim = disabled ? 0.4f : 0.6f;
+                float dim = disabled ? 0.5f : 0.7f;
 
                 if (sel) {
                     render_draw_rect(content_x,
@@ -1258,10 +1293,12 @@ screen_settings_draw(struct playos_shell *s)
                                  content_y - label_scale * 0.5f,
                                  label_scale, r, r, r, 1.0f);
 
-                /* Show the pending target version next to "Restart to
-                 * Apply" once an update is ready. */
-                if (cursor == 5 && s->update_ready && s->boot_slot_version[0] &&
-                    strcmp(s->boot_slot_version, "unknown") != 0) {
+                /* "Restart to Apply" shows the pending target version once an
+                 * update is ready; the other rows get a chevron instead. */
+                bool shows_version =
+                    cursor == 5 && s->update_ready && s->boot_slot_version[0] &&
+                    strcmp(s->boot_slot_version, "unknown") != 0;
+                if (shows_version) {
                     char vbuf[80];
                     snprintf(vbuf, sizeof(vbuf), "v%s", s->boot_slot_version);
                     float vw = render_text_width(vbuf, label_scale * 0.8f);
@@ -1269,6 +1306,10 @@ screen_settings_draw(struct playos_shell *s)
                                      content_y - label_scale * 0.5f,
                                      label_scale * 0.8f,
                                      0.9f, 0.9f, 0.9f, 1.0f);
+                } else {
+                    draw_row_chevron((float)w - content_x,
+                                     content_y - label_scale * 0.5f,
+                                     label_scale, sel);
                 }
 
                 content_y += label_scale * 8.0f;
@@ -1285,10 +1326,13 @@ screen_settings_draw(struct playos_shell *s)
                                      0.84f, 0.42f, 0.0f, 0.9f);
                 }
                 const char *label = "Install PlayOS to internal disk";
-                float r = sel ? 1.0f : 0.6f;
+                float r = sel ? 1.0f : 0.7f;
                 render_draw_text(label, content_x,
                                  content_y - label_scale * 0.5f,
                                  label_scale, r, r, r, 1.0f);
+                draw_row_chevron((float)w - content_x,
+                                 content_y - label_scale * 0.5f,
+                                 label_scale, sel);
                 content_y += label_scale * 8.0f;
             }
 

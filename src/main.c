@@ -242,27 +242,6 @@ shell_status_refresh(struct playos_shell *s)
     }
 }
 
-/* Append `suffix` to `buf` only when the result still fits both the buffer and
- * the pixel budget. Used by the status bar, which must never overflow into the
- * right-hand thermal chip. */
-static void
-status_try_append(char *buf, size_t bufsz, const char *suffix, float scale,
-                  float budget)
-{
-    size_t len = strlen(buf);
-    size_t add = strlen(suffix);
-    char probe[384];
-
-    if (len + add + 1 > bufsz || len + add + 1 > sizeof(probe))
-        return;
-
-    snprintf(probe, sizeof(probe), "%s%s", buf, suffix);
-    if (render_text_width(probe, scale) > budget)
-        return;
-
-    memcpy(buf + len, suffix, add + 1);
-}
-
 static void
 shell_status_bar_draw(struct playos_shell *s)
 {
@@ -312,35 +291,47 @@ shell_status_bar_draw(struct playos_shell *s)
      * unconditionally and overlapped the chip — "Profile: Balanced" and
      * "Thermal: Normal" rendered as "…BALANCEDTHERMAL…". Segments are added
      * most-important-first and only kept if they still fit. */
+    /* Three zones instead of one crowded left block and one right chip:
+     *   left   - battery
+     *   centre - CPU/GPU temperatures
+     *   right  - performance profile, then the colour-coded thermal chip
+     * Previously every segment was appended to the left and only the thermal
+     * chip sat on the right, which left the middle of the bar empty with the
+     * temperature reading floating in it. */
+
     char thermal_text[64];
     snprintf(thermal_text, sizeof(thermal_text), "Thermal: %s", thermal);
-    float thermal_w = render_text_width(thermal_text, scale);
-    float thermal_x = (float)w - thermal_w - (float)w * 0.03f;
 
-    float left_x     = (float)w * 0.03f;
-    float left_budget = thermal_x - left_x - (float)w * 0.02f;  /* keep a gap */
+    char profile_text[80];
+    snprintf(profile_text, sizeof(profile_text), "Profile: %s", profile);
 
-    char left[256];
-    snprintf(left, sizeof(left), "%s", batt);
+    float edge_x  = (float)w * 0.03f;
+    float right_w = render_text_width(thermal_text, scale) +
+                    render_text_width(profile_text, scale) +
+                    scale * 16.0f;                 /* chip + gap */
+    float right_x = (float)w - edge_x - right_w;
+    float left_w  = render_text_width(batt, scale);
 
-    if (temp[0]) {
-        char suffix[160];
-        snprintf(suffix, sizeof(suffix), "    %s", temp);
-        status_try_append(left, sizeof(left), suffix, scale, left_budget);
+    /* Centre the temperatures between the battery and the right block; drop
+     * them when the bar is too narrow to hold all three without touching. */
+    char centre[96];
+    snprintf(centre, sizeof(centre), "%s", temp);
+    float centre_x = 0.0f;
+    if (centre[0]) {
+        float centre_w = render_text_width(centre, scale);
+        float space_x  = edge_x + left_w + scale * 8.0f;
+        float space_w  = right_x - scale * 8.0f - space_x;
+        if (centre_w <= space_w)
+            centre_x = space_x + (space_w - centre_w) * 0.5f;
+        else
+            centre[0] = '\0';
     }
-    {
-        char suffix[160];
-        snprintf(suffix, sizeof(suffix), "    Profile: %s", profile);
-        status_try_append(left, sizeof(left), suffix, scale, left_budget);
-    }
 
-    /* Narrow output (or tiny bar): hard-truncate so it can never overlap. */
-    for (size_t len = strlen(left); len > 1 &&
-         render_text_width(left, scale) > left_budget; ) {
-        left[--len] = '\0';
-    }
+    render_draw_text(batt, edge_x, text_y, scale, 0.85f, 0.85f, 0.9f, 1.0f);
 
-    render_draw_text(left, left_x, text_y, scale, 0.85f, 0.85f, 0.9f, 1.0f);
+    if (centre[0])
+        render_draw_text(centre, centre_x, text_y, scale,
+                         0.75f, 0.78f, 0.85f, 1.0f);
 
     /* Thermal state on the right, colour-coded. */
     float tr = 0.30f, tg = 0.85f, tb = 0.40f;  /* Normal: green */
@@ -352,7 +343,12 @@ shell_status_bar_draw(struct playos_shell *s)
         tr = 1.00f; tg = 0.25f; tb = 0.25f;
     }
 
-    /* Right-hand chip, positioned above so the left summary could be budgeted. */
+    float profile_x = right_x;
+    float thermal_x = right_x + render_text_width(profile_text, scale) +
+                      scale * 16.0f;
+
+    render_draw_text(profile_text, profile_x, text_y, scale,
+                     0.6f, 0.6f, 0.7f, 1.0f);
     render_draw_text(thermal_text, thermal_x, text_y, scale, tr, tg, tb, 1.0f);
 }
 
