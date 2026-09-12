@@ -142,9 +142,15 @@ sc_registry_global(void *data, struct wl_registry *registry, uint32_t name,
         }
     } else if (strcmp(interface,
                       zwlr_screencopy_manager_v1_interface.name) == 0) {
-        uint32_t v = version < 3 ? version : 3;
+        /* Bind version 1 deliberately. At v1/v2 the compositor guarantees a
+         * wl_shm "buffer" event and the client copies straight from it; v3 adds
+         * buffer_done plus a linux-dmabuf offer, which we do not use and which
+         * is what crashed the shell (see sc_frame_listener). */
+        uint32_t v = version < 1 ? version : 1;
         g->manager = wl_registry_bind(registry, name,
                                       &zwlr_screencopy_manager_v1_interface, v);
+        PLAYOS_LOG_I("screencopy", "manager bound (advertised=%u, using=%u)",
+                     version, v);
     }
 }
 
@@ -277,11 +283,41 @@ sc_frame_failed(void *data, struct zwlr_screencopy_frame_v1 *frame)
     c->done = 1;
 }
 
+/* Every event in the listener struct must have a handler, including those only
+ * sent by newer protocol versions: libwayland aborts the whole process when a
+ * received event has no listener function ("listener function for opcode N of
+ * X is NULL"). That abort killed the shell on hardware and left the compositor
+ * showing an empty (blue) scene. We bind the manager at version 1 below, so
+ * damage/linux_dmabuf/buffer_done are never sent — these no-ops are insurance
+ * against a version negotiation surprise. */
+static void
+sc_frame_damage(void *data, struct zwlr_screencopy_frame_v1 *frame,
+                uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    (void)data; (void)frame; (void)x; (void)y; (void)width; (void)height;
+}
+
+static void
+sc_frame_linux_dmabuf(void *data, struct zwlr_screencopy_frame_v1 *frame,
+                      uint32_t format, uint32_t width, uint32_t height)
+{
+    (void)data; (void)frame; (void)format; (void)width; (void)height;
+}
+
+static void
+sc_frame_buffer_done(void *data, struct zwlr_screencopy_frame_v1 *frame)
+{
+    (void)data; (void)frame;
+}
+
 static const struct zwlr_screencopy_frame_v1_listener sc_frame_listener = {
-    .buffer = sc_frame_buffer,
-    .flags  = sc_frame_flags,
-    .ready  = sc_frame_ready,
-    .failed = sc_frame_failed,
+    .buffer       = sc_frame_buffer,
+    .flags        = sc_frame_flags,
+    .ready        = sc_frame_ready,
+    .failed       = sc_frame_failed,
+    .damage       = sc_frame_damage,
+    .linux_dmabuf = sc_frame_linux_dmabuf,
+    .buffer_done  = sc_frame_buffer_done,
 };
 
 /* ── Cleanup / export ─────────────────────────────────────────────────── */
