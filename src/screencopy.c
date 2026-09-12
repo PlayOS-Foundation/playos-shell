@@ -55,6 +55,7 @@ struct sc_capture {
     uint32_t width;
     uint32_t height;
     uint32_t stride;
+    uint32_t format;   /* wl_shm format the compositor filled in */
 
     int y_invert;
     int done;     /* ready or failed received */
@@ -203,7 +204,10 @@ sc_frame_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame,
                 uint32_t stride)
 {
     struct sc_capture *c = data;
-    (void)format;
+    c->format = format;
+
+    PLAYOS_LOG_I("screencopy", "shm buffer format=0x%08x %ux%u stride=%u",
+                 format, width, height, stride);
 
     size_t size = (size_t)stride * height;
 
@@ -360,16 +364,42 @@ sc_export(struct sc_capture *c, const char *path)
     if (!rgba)
         return 0;
 
+    /* wl_shm 32-bit formats are little-endian, so the byte order in memory is
+     * the reverse of the ARGB/XRGB naming. The compositor tells us which format
+     * it filled in the "buffer" event and we must honour it: converting as if
+     * it were always B,G,R,X swapped red and blue on hardware (a navy UI came
+     * out brown) because wlroots offered the XBGR/ABGR variant. */
+    int rgb_order;   /* 0 = memory B,G,R,X ; 1 = memory R,G,B,X */
+    switch (c->format) {
+    case WL_SHM_FORMAT_ARGB8888:   /* 0xAARRGGBB -> B,G,R,A */
+    case WL_SHM_FORMAT_XRGB8888:   /* 0x00RRGGBB -> B,G,R,X */
+        rgb_order = 0;
+        break;
+    case WL_SHM_FORMAT_ABGR8888:   /* 0xAABBGGRR -> R,G,B,A */
+    case WL_SHM_FORMAT_XBGR8888:   /* 0x00BBGGRR -> R,G,B,X */
+        rgb_order = 1;
+        break;
+    default:
+        PLAYOS_LOG_W("screencopy",
+                     "unexpected shm format 0x%08x - assuming B,G,R,X",
+                     c->format);
+        rgb_order = 0;
+        break;
+    }
+
     for (uint32_t y = 0; y < c->height; y++) {
         uint32_t src_y = c->y_invert ? (c->height - 1 - y) : y;
         const unsigned char *src =
             (const unsigned char *)c->map + (size_t)src_y * c->stride;
         unsigned char *dst = rgba + (size_t)y * c->width * 4;
         for (uint32_t x = 0; x < c->width; x++) {
-            dst[x * 4 + 0] = src[x * 4 + 2];   /* R */
-            dst[x * 4 + 1] = src[x * 4 + 1];   /* G */
-            dst[x * 4 + 2] = src[x * 4 + 0];   /* B */
-            dst[x * 4 + 3] = 255;              /* opaque */
+            unsigned char s0 = src[x * 4 + 0];
+            unsigned char s1 = src[x * 4 + 1];
+            unsigned char s2 = src[x * 4 + 2];
+            dst[x * 4 + 0] = rgb_order ? s0 : s2;   /* R */
+            dst[x * 4 + 1] = s1;                    /* G */
+            dst[x * 4 + 2] = rgb_order ? s2 : s0;   /* B */
+            dst[x * 4 + 3] = 255;                   /* opaque */
         }
     }
 
