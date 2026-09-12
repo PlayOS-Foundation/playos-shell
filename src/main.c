@@ -313,12 +313,11 @@ shell_status_bar_draw(struct playos_shell *s)
                      text_y, scale, tr, tg, tb, 1.0f);
 }
 
-/* ── Screenshot capture (System tab, COMMAND reserved button) ────────────
- * Writes a PNG straight into the persistent USB data partition so captures
- * survive across boots and can be pulled off the stick. We read the current
- * framebuffer with LoadImageFromScreen() and export to an absolute path with
- * ExportImage() — Raylib's TakeScreenshot() is not usable here because it
- * prefixes CORE.Storage.basePath instead of honoring absolute paths. */
+/* ── Screenshot capture (COMMAND reserved button) ─────────────────────────
+ * Preferred path: capture the composited output through the compositor's
+ * wlr-screencopy manager (screencopy.c) so the PNG contains a running game
+ * and/or the pause overlay. Fallback: grab the shell's own surface, which is
+ * only meaningful while the shell is the foreground client. */
 static void
 shell_take_screenshot(struct playos_shell *s)
 {
@@ -331,16 +330,56 @@ shell_take_screenshot(struct playos_shell *s)
     snprintf(path, sizeof(path), "/data/screenshots/playos-%ld.%03ld.png",
              (long)ts.tv_sec, (long)(ts.tv_nsec / 1000000));
 
-    Image img = LoadImageFromScreen();
-    if (img.data != NULL) {
-        s->screenshot_ok = ExportImage(img, path);
-        UnloadImage(img);
+    if (shell_capture_output(path)) {
+        s->screenshot_ok = true;
+    } else if (!s->is_suspended) {
+        Image img = LoadImageFromScreen();
+        if (img.data != NULL) {
+            s->screenshot_ok = ExportImage(img, path);
+            UnloadImage(img);
+        } else {
+            s->screenshot_ok = false;
+        }
     } else {
         s->screenshot_ok = false;
     }
 
     s->screenshot_flash_until = s->elapsed_time + 1.5;
-    PLAYOS_LOG_I("shell", "screenshot -> %s (ok=%d)", path, (int)s->screenshot_ok);
+    PLAYOS_LOG_I("shell", "screenshot -> %s (ok=%d)", path,
+                 (int)s->screenshot_ok);
+}
+
+/* ── Screenshot preference (persisted on /data) ─────────────────────────
+ * Defaults to ON so "screenshot at any time" works without a Settings trip;
+ * the System-tab toggle writes through to the data partition. */
+#define SHELL_SCREENSHOT_CONF "/data/config/screenshot"
+
+void
+shell_screenshot_setting_load(struct playos_shell *s)
+{
+    s->screenshot_enabled = true;
+
+    FILE *f = fopen(SHELL_SCREENSHOT_CONF, "r");
+    if (!f)
+        return;   /* first boot: keep the default */
+    int c = fgetc(f);
+    if (c == '0' || c == '1')
+        s->screenshot_enabled = (c == '1');
+    fclose(f);
+}
+
+void
+shell_screenshot_setting_save(const struct playos_shell *s)
+{
+    mkdir("/data/config", 0755);
+    FILE *f = fopen(SHELL_SCREENSHOT_CONF, "w");
+    if (!f) {
+        PLAYOS_LOG_W("shell", "cannot persist screenshot setting");
+        return;
+    }
+    fputc(s->screenshot_enabled ? '1' : '0', f);
+    fputc('\n', f);
+    fclose(f);
 }
 
 static void
@@ -577,6 +616,10 @@ main(int argc, char *argv[])
         s->current_screen = SCREEN_RECOVERY;
         screen_recovery_enter(s);
     }
+
+    /* Screenshot preference lives on /data and defaults to ON (Sprint 14). */
+    shell_screenshot_setting_load(s);
+
     s->output_width = 1920;
     s->output_height = 1080;
     s->dpi_scale = shell_detect_dpi_scale();
@@ -690,13 +733,49 @@ main(int argc, char *argv[])
          * shell_input_poll() on one fresh frame (no Raylib one-frame lag). */
         shell_input_poll(s);
 
-        /* Screenshot trigger: COMMAND reserved button, gated by the System
-         * settings toggle. Only armed while the shell is foreground — when a
-         * game owns the framebuffer the shell is suspended and must not grab
-         * the screen. */
-        if (!s->is_suspended && s->screenshot_enabled &&
-            shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU))
-            s->screenshot_pending = true;
+        /* COMMAND gesture (Sprint 14):
+         *   - a game is running: tap = pause overlay, hold >= 700ms = screenshot
+         *   - shell UI:         press = screenshot (there is no overlay to open)
+         * The capture goes through wlr-screencopy, so it contains the real
+         * composited frame and works while a game or the overlay is on screen. */
+        {
+            int cmd_down = shell_input_button_held(s, PLAYOS_BUTTON_QUICK_MENU);
+
+            if (cmd_down && !s->command_held) {
+                s->command_held = true;
+                s->command_hold_start = s->elapsed_time;
+                s->command_shot_fired = false;
+            }
+
+            if (cmd_down && s->command_held && !s->command_shot_fired &&
+                s->screenshot_enabled &&
+                (s->elapsed_time - s->command_hold_start) * 1000.0 >=
+                    SHELL_COMMAND_HOLD_MS) {
+                s->command_shot_fired = true;
+                s->screenshot_pending = true;
+            }
+
+            if (!cmd_down && s->command_held) {
+                s->command_held = false;
+                if (!s->command_shot_fired) {
+                    if (s->game_running) {
+                        PLAYOS_LOG_I("shell", "COMMAND tap - showing overlay");
+                        if (playos_trusted_show_overlay(-1) != 0)
+                            PLAYOS_LOG_W("shell", "ShowOverlay failed");
+                    } else if (s->screenshot_enabled) {
+                        s->screenshot_pending = true;
+                    }
+                }
+                s->command_shot_fired = false;
+            }
+
+            /* Captures run regardless of is_suspended: screencopy does not
+             * need the shell surface to be visible. */
+            if (s->screenshot_pending) {
+                shell_take_screenshot(s);
+                s->screenshot_pending = false;
+            }
+        }
 
         /* Audio bootstrap: (1) open the playback device once the late-
          * registering card appears, (2) apply unmute + default volume once the
@@ -814,18 +893,6 @@ main(int argc, char *argv[])
         }
 #endif
 
-        /* Command Center (COMMAND / QUICK_MENU) while a game is running opens
-         * the pause overlay (Sprint 14 T6/13-14). The shell reads reserved
-         * evdev directly even while suspended; the compositor has no libinput
-         * backend on DRM, so this is the reliable path: shell -> init ->
-         * compositor ShowOverlay. */
-        if (s->game_running &&
-            shell_input_button_pressed(s, PLAYOS_BUTTON_QUICK_MENU)) {
-            PLAYOS_LOG_I("shell", "COMMAND pressed in game - showing overlay");
-            if (playos_trusted_show_overlay(-1) != 0)
-                PLAYOS_LOG_W("shell", "ShowOverlay failed");
-        }
-
         /* Update current screen */
         switch (s->current_screen) {
         case SCREEN_HOME:        screen_home_update(s);        break;
@@ -848,13 +915,9 @@ main(int argc, char *argv[])
             if (s->power_info_valid)
                 shell_status_bar_draw(s);
 
-            /* Capture after the screen and status bar are drawn but before
-             * the toast, so the saved PNG never contains the toast itself. */
-            if (s->screenshot_pending) {
-                shell_take_screenshot(s);
-                s->screenshot_pending = false;
-            }
-
+            /* Captures are taken in the input section (they must also work
+             * while the shell is suspended in game), so only the toast is
+             * drawn here. */
             if (s->elapsed_time < s->screenshot_flash_until)
                 shell_screenshot_toast_draw(s);
 

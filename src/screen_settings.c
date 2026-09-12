@@ -505,6 +505,7 @@ screen_settings_update(struct playos_shell *s)
             switch (s->settings_power_cursor) {
             case 0:
                 s->screenshot_enabled = !s->screenshot_enabled;
+                shell_screenshot_setting_save(s);
                 PLAYOS_LOG_I("shell", "settings: screenshot capture %s",
                              s->screenshot_enabled ? "enabled" : "disabled");
                 break;

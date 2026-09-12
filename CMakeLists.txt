@@ -74,6 +74,17 @@ add_custom_command(
     COMMENT "Generating xdg-shell client protocol"
 )
 
+# Generate wlr-screencopy client protocol (Sprint 14 full-output screenshots).
+# The XML is vendored in protocols/ because wlroots does not install it.
+set(SCREENCOPY_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocols/wlr-screencopy-unstable-v1.xml")
+add_custom_command(
+    OUTPUT ${GEN_DIR}/wlr-screencopy-unstable-v1-client-protocol.h ${GEN_DIR}/wlr-screencopy-unstable-v1-protocol.c
+    COMMAND ${WAYLAND_SCANNER} client-header ${SCREENCOPY_XML} ${GEN_DIR}/wlr-screencopy-unstable-v1-client-protocol.h
+    COMMAND ${WAYLAND_SCANNER} private-code  ${SCREENCOPY_XML} ${GEN_DIR}/wlr-screencopy-unstable-v1-protocol.c
+    DEPENDS ${SCREENCOPY_XML}
+    COMMENT "Generating wlr-screencopy client protocol"
+)
+
 # Umbrella target so raylib and the shell can depend on the generated protocol
 # bindings being available before their first compile step.
 add_custom_target(playos-protocols
@@ -81,7 +92,9 @@ add_custom_target(playos-protocols
         ${GEN_DIR}/playos-v1-client-protocol.h
         ${GEN_DIR}/playos-v1-protocol.c
         ${GEN_DIR}/xdg-shell-client-protocol.h
-        ${GEN_DIR}/xdg-shell-protocol.c)
+        ${GEN_DIR}/xdg-shell-protocol.c
+        ${GEN_DIR}/wlr-screencopy-unstable-v1-client-protocol.h
+        ${GEN_DIR}/wlr-screencopy-unstable-v1-protocol.c)
 
 # ── Raylib static library (required — the raw GLES2 renderer is retired) ──
 set(PLAYOS_SHELL_USE_RAYLIB ON CACHE BOOL
@@ -132,6 +145,8 @@ set(SHELL_SOURCES
     src/screen_settings.c
     src/screen_recovery.c
     src/render_util.c
+    src/screencopy.c
+    ${GEN_DIR}/wlr-screencopy-unstable-v1-protocol.c
 )
 
 add_executable(playos-shell ${SHELL_SOURCES})
