@@ -389,6 +389,16 @@ settings_install_payload_present(void)
     return ok;
 }
 
+/* S14 P4: the Input tab hosts the Live Input Test, a diagnostic whose whole
+ * point is watching axes move. Analog input is deliberately not "activity" for
+ * the idle throttle (the Ally's stick rests with a +/-128 oscillation), so this
+ * screen asks for full frame rate explicitly. */
+bool
+screen_settings_wants_full_rate(const struct playos_shell *s)
+{
+    return s->settings_tab == TAB_INPUT;
+}
+
 void
 screen_settings_enter(struct playos_shell *s)
 {

@@ -11,6 +11,11 @@
 #include <time.h>
 
 #include "playos/playos_input.h"
+
+/* S14 P4 tunables */
+#define PLAYOS_INPUT_ACTIVE_S          0.6   /* keep full rate this long after input */
+#define PLAYOS_SCREEN_CHANGE_FULL_RATE_S 0.7 /* ... and after a screen change */
+#define PLAYOS_IDLE_FRAME_INTERVAL     0.12  /* idle ceiling: ~8 fps */
 #include "playos/playos_power.h"
 
 /* Forward declaration: bound by the Raylib PlayOS backend (rcore_playos.c)
@@ -100,6 +105,17 @@ struct playos_shell {
 
     /* ── Timing ── */
     struct timespec start_time;
+    /* ── S14 P4: damage-driven rendering ────────────────────────────────
+     * The shell used to redraw continuously (~55 fps) even when nothing
+     * changed, which is wasted GPU work, heat and battery on a handheld.
+     * It now redraws when something can have changed and otherwise settles
+     * at PLAYOS_IDLE_FPS. Input is still polled every iteration, so latency
+     * is unaffected; only the drawing is skipped. */
+    double          last_input_activity;   /* elapsed_time of the last real input event */
+    double          last_draw_time;        /* elapsed_time of the last completed frame */
+    double          screen_change_until;   /* full-rate window after a screen change */
+    int             prev_screen;           /* screen-change detection */
+
     double          frame_time;
     double          elapsed_time;
 
@@ -209,6 +225,10 @@ void screen_game_detail_draw(struct playos_shell *s);
 void screen_settings_enter(struct playos_shell *s);
 void screen_settings_update(struct playos_shell *s);
 void screen_settings_draw(struct playos_shell *s);
+
+/* S14 P4: true when the visible settings tab must render at full rate
+ * (the Live Input Test diagnostic). */
+bool screen_settings_wants_full_rate(const struct playos_shell *s);
 
 /* S14-T6: recovery menu shown when launched with PLAYOS_RECOVERY=1. */
 void screen_recovery_enter(struct playos_shell *s);

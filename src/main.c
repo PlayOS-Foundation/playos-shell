@@ -946,8 +946,46 @@ main(int argc, char *argv[])
             }
         }
 
-        /* Draw current screen — skip while suspended/backgrounded */
+        /* Draw current screen — skip while suspended/backgrounded.
+         *
+         * S14 P4: redraw only when something can have changed; idle, settle at
+         * PLAYOS_IDLE_FPS. Input polling above is untouched, so latency does not
+         * change. Modal/confirm flows, toasts and the installer hold all force
+         * full rate. */
         if (!s->is_suspended) {
+            if (s->prev_screen != s->current_screen) {
+                s->prev_screen = s->current_screen;
+                s->screen_change_until =
+                    s->elapsed_time + PLAYOS_SCREEN_CHANGE_FULL_RATE_S;
+            }
+
+            bool busy =
+                (s->elapsed_time - s->last_input_activity) < PLAYOS_INPUT_ACTIVE_S ||
+                s->elapsed_time < s->screen_change_until ||
+                s->elapsed_time < s->toast_until ||
+                s->elapsed_time < s->screenshot_flash_until ||
+                s->update_in_progress ||
+                s->power_confirm ||
+                s->update_restart_confirm ||
+                s->recovery_confirm ||
+                s->recovery_log_view ||
+                s->installer_confirm ||
+                s->installer_hold_start > 0.0 ||
+                /* Diagnostics that must update live (stick/trigger readouts) */
+                (s->current_screen == SCREEN_SETTINGS &&
+                 screen_settings_wants_full_rate(s));
+
+            if (!busy &&
+                (s->elapsed_time - s->last_draw_time) < PLAYOS_IDLE_FRAME_INTERVAL) {
+                /* Nothing changed and the idle interval has not elapsed: skip
+                 * the frame. Sleep briefly rather than spinning - raylib's frame
+                 * pacing happens inside EndDrawing(), so a skipped frame would
+                 * otherwise leave the loop to burn a core. 4 ms keeps a button
+                 * press (polled by shell_input_poll above) at single-digit ms
+                 * latency while the redraw itself waits for the idle interval. */
+                usleep(4000);
+            } else {
+            s->last_draw_time = s->elapsed_time;
             shell_status_refresh(s);
             switch (s->current_screen) {
             case SCREEN_HOME:        screen_home_draw(s);        break;
@@ -971,6 +1009,7 @@ main(int argc, char *argv[])
 
             render_end_frame(s);   /* EndDrawing() + swap via backend */
             frame_count++;
+            }
         }
 
         /* ── Timing ── */

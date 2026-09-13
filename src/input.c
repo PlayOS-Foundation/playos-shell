@@ -994,6 +994,19 @@ static void shell_input_drain_fd(struct playos_shell *s, int fd, const char *nam
          * gamepad buttons (covers volume keys, reserved keys, sticks,
          * triggers). Ignoring release (value == 0) keeps quick taps visible
          * on screen instead of being overwritten by the release next frame. */
+        /* S14 P4: only *discrete* interactions hold the UI at full frame rate.
+         * Analog axes are deliberately excluded: the Ally's right stick rests
+         * with a +/-128 oscillation on ABS_RY (measured: ~65 events/s with
+         * nobody touching it), which otherwise pins the shell at 60 fps forever
+         * and defeats the idle throttle. Stick motion still drives the UI - it
+         * is just drawn at the idle rate (~8 fps), which is smooth enough for
+         * list scrolling and costs nothing when the stick is resting. */
+        if (ev.type == EV_KEY ||
+            (ev.type == EV_ABS &&
+             (ev.code == ABS_HAT0X || ev.code == ABS_HAT0Y))) {
+            s->last_input_activity = s->elapsed_time;
+        }
+
         if (ev.type != EV_SYN && ev.value != 0) {
             s->raw_evdev_type = ev.type;
             s->raw_evdev_code = ev.code;
