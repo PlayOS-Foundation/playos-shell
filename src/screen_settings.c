@@ -305,88 +305,90 @@ settings_disk_removable(const char *disk_name)
     return settings_read_int_file(rb, &removable) == 0 && removable == 1;
 }
 
+/* Try one partition: mount it read-only and look for the payload files. */
 static bool
-settings_install_payload_present(void)
+settings_payload_on_device(const char *dev)
 {
-    char dev[128] = {0};
-
-    /* 1) Prefer /dev/disk/by-label/playos-a when it is on a removable disk. */
-    if (access("/dev/disk/by-label/playos-a", R_OK) == 0) {
-        char resolved[256] = {0};
-        ssize_t rl = readlink("/dev/disk/by-label/playos-a", resolved,
-                              sizeof(resolved) - 1);
-        if (rl > 0) {
-            resolved[rl] = '\0';
-            const char *base = strrchr(resolved, '/');
-            base = base ? base + 1 : resolved;
-            char devtmp[256];
-            snprintf(devtmp, sizeof(devtmp), "/dev/%s", base);
-            char disk[128];
-            settings_strip_partition_suffix(devtmp, disk, sizeof(disk));
-            const char *dname = strrchr(disk, '/');
-            dname = dname ? dname + 1 : disk;
-            if (settings_disk_removable(dname))
-                snprintf(dev, sizeof(dev), "/dev/disk/by-label/playos-a");
-        }
-    }
-
-    /* 2) blkid fallback: accept a playos-a device only on a removable disk. */
-    if (!dev[0]) {
-        FILE *fp = popen("blkid -L playos-a 2>/dev/null", "r");
-        char line[128];
-        while (fp && fgets(line, sizeof(line), fp)) {
-            line[strcspn(line, "\r\n")] = '\0';
-            if (!line[0])
-                continue;
-            char disk[128];
-            settings_strip_partition_suffix(line, disk, sizeof(disk));
-            const char *dname = strrchr(disk, '/');
-            dname = dname ? dname + 1 : disk;
-            if (settings_disk_removable(dname)) {
-                snprintf(dev, sizeof(dev), "%s", line);
-                break;
-            }
-        }
-        if (fp)
-            pclose(fp);
-    }
-
-    if (!dev[0]) {
-        PLAYOS_LOG_W("shell", "install payload: no playos-a device found on "
-                     "a removable disk (NVMe slot ignored)");
-        return false;
-    }
-    PLAYOS_LOG_I("shell", "install payload: found removable device %s", dev);
+    const char *mnt = "/run/playos-payload-check";
 
     /* Mount under /run, never /mnt: on an installed system / is a read-only
-     * squashfs, and mkdir("/mnt/...") fails there with EROFS. That made the
-     * install option vanish whenever the shell ran from an installed root (for
-     * example when a USB boot had wrongly pivoted into the installed slot). */
-    const char *mnt = "/run/playos-payload-check";
-    if (mkdir(mnt, 0755) != 0 && errno != EEXIST) {
-        PLAYOS_LOG_W("shell", "install payload: mkdir %s failed: %s", mnt,
-                     strerror(errno));
+     * squashfs and mkdir("/mnt/...") fails there with EROFS. */
+    if (mkdir(mnt, 0755) != 0 && errno != EEXIST)
         return false;
-    }
 
     if (mount(dev, mnt, "ext2", MS_RDONLY, NULL) != 0 &&
-        mount(dev, mnt, "ext4", MS_RDONLY, NULL) != 0) {
-        PLAYOS_LOG_W("shell", "install payload: mount %s failed: %s",
-                     dev, strerror(errno));
+        mount(dev, mnt, "ext4", MS_RDONLY, NULL) != 0)
         return false;
-    }
 
-    char squashfs[128];
-    char efi[128];
+    char squashfs[160], efi[160];
     snprintf(squashfs, sizeof(squashfs), "%s/rootfs.squashfs", mnt);
     snprintf(efi, sizeof(efi), "%s/BOOTX64.EFI", mnt);
 
     bool ok = access(squashfs, R_OK) == 0 && access(efi, R_OK) == 0;
-    if (!ok)
-        PLAYOS_LOG_W("shell", "install payload: rootfs.squashfs/BOOTX64.EFI "
-                     "missing on %s", dev);
     umount(mnt);
+
+    if (ok)
+        PLAYOS_LOG_I("shell", "install payload: found on %s", dev);
     return ok;
+}
+
+/* S13.7 / S14-P1: detect the install payload on the boot medium.
+ *
+ * A live/installer USB carries rootfs.squashfs + BOOTX64.EFI on its playos-a
+ * partition. Every *name*-based way of finding that partition is unreliable:
+ *
+ *   - partition and filesystem names ("playos-a", "playos-data", "ESP") are
+ *     shared with the internal disk of an installed system, and
+ *     /dev/disk/by-label/playos-a gets repointed between the two as udev sees
+ *     them - measured on hardware, it alternates;
+ *   - the sysfs `removable` flag is 0 for the stick behind a dock/hub (also
+ *     measured), which silently hid the install action altogether.
+ *
+ * So: try every partition and accept only one whose *contents* look like the
+ * payload. The internal disk's playos-a slot cannot pass - it is a squashfs
+ * slot, not an ext2/ext4 filesystem with a rootfs.squashfs file in it. Removable
+ * disks are tried first only to keep the common case fast. */
+static bool
+settings_install_payload_present(void)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        DIR *d = opendir("/sys/class/block");
+        if (!d)
+            return false;
+
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (de->d_name[0] == '.')
+                continue;
+
+            char sysp[288];
+            snprintf(sysp, sizeof(sysp), "/sys/class/block/%s/partition",
+                     de->d_name);
+            if (access(sysp, F_OK) != 0)
+                continue;                     /* not a partition */
+
+            char dev[96], whole[96];
+            snprintf(dev, sizeof(dev), "/dev/%s", de->d_name);
+            settings_strip_partition_suffix(dev, whole, sizeof(whole));
+            const char *wn = strrchr(whole, '/');
+            wn = wn ? wn + 1 : whole;
+
+            /* Pass 0: removable media (the usual stick) first. Pass 1: the rest. */
+            bool removable = settings_disk_removable(wn);
+            if ((pass == 0) != removable)
+                continue;
+
+            if (settings_payload_on_device(dev)) {
+                closedir(d);
+                return true;
+            }
+        }
+        closedir(d);
+    }
+
+    PLAYOS_LOG_W("shell", "install payload: no partition carries "
+                 "rootfs.squashfs + BOOTX64.EFI");
+    return false;
 }
 
 /* S14 P4: the Input tab hosts the Live Input Test, a diagnostic whose whole
