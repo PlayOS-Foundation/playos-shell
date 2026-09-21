@@ -192,6 +192,10 @@ struct playos_shell {
 #define SHELL_INSTALL_PROGRESS  1
 #define SHELL_INSTALL_COMPLETE  2
 #define SHELL_INSTALL_ERROR     3
+
+/* The end-state cards ignore input for this long after appearing, so a button
+ * that was already held when the install finished cannot skip them. */
+#define INSTALL_CARD_HOLD_OFF   1.0
     char   installer_path[SHELL_INSTALLER_MAX_DISKS][80];   /* /dev/nvme0n1 */
     char   installer_label[SHELL_INSTALLER_MAX_DISKS][96];  /* model + size  */
     int    installer_count;
@@ -202,6 +206,7 @@ struct playos_shell {
     /* S14.5-T4: the shell draws the install itself - no second fullscreen app.
      * The worker reports progress over the trusted socket and init relays it. */
     int    install_stage;           /* SHELL_INSTALL_* */
+    double install_stage_since;     /* elapsed_time the stage was entered */
     int    install_step;            /* 0-based step the worker is on */
     int    install_count;           /* steps in total */
     int    install_percent;

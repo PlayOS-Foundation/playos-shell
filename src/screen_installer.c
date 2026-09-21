@@ -221,20 +221,25 @@ screen_installer_update(struct playos_shell *s)
      * picker is unreachable until the install ends. */
     if (s->install_stage == SHELL_INSTALL_PROGRESS)
         return;                                  /* nothing to press mid-install */
-    if (s->install_stage == SHELL_INSTALL_COMPLETE) {
-        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+    /* Both end states ignore input for a moment: the user is often still holding
+     * A from the confirm, and a button that was already down when the card
+     * appeared must not dismiss it before it has been read. */
+    if (s->install_stage == SHELL_INSTALL_COMPLETE ||
+        s->install_stage == SHELL_INSTALL_ERROR) {
+        if (s->elapsed_time - s->install_stage_since < INSTALL_CARD_HOLD_OFF)
+            return;
+
+        if (s->install_stage == SHELL_INSTALL_COMPLETE &&
+            shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            PLAYOS_LOG_I("shell", "installer: reboot requested from the card");
             (void)playos_trusted_reboot(-1);
             shell_set_toast(s, "Rebooting...");
-        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
-            s->install_stage = SHELL_INSTALL_IDLE;
-            screen_installer_enter(s);
+            return;
         }
-        return;
-    }
-    if (s->install_stage == SHELL_INSTALL_ERROR) {
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH) ||
             shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
             s->install_stage = SHELL_INSTALL_IDLE;
+            PLAYOS_LOG_I("shell", "installer: back to the picker");
             screen_installer_enter(s);
         }
         return;
@@ -279,6 +284,7 @@ screen_installer_update(struct playos_shell *s)
                              "Could not start the install");
                     s->install_stage = SHELL_INSTALL_ERROR;
                 } else {
+                    s->install_stage_since = s->elapsed_time;
                     s->install_stage = SHELL_INSTALL_PROGRESS;
                     s->install_step = 0;
                     s->install_count = 8;
@@ -362,11 +368,20 @@ installer_draw_stage(struct playos_shell *s, float w, float h)
     }
 
     if (s->install_stage == SHELL_INSTALL_COMPLETE) {
-        const char *msg = "PlayOS is installed. Reboot to start it.";
-        float ms = 3.6f;
-        render_draw_text(msg, (w - render_text_width(msg, ms)) * 0.5f, h * 0.45f,
-                         ms, 0.6f, 1.0f, 0.6f, 1.0f);
-        const char *hint = "A: Reboot now    B: Stay in PlayOS";
+        const char *ok = "Installation successful";
+        float oks = 4.6f;
+        render_draw_text(ok, (w - render_text_width(ok, oks)) * 0.5f, h * 0.40f,
+                         oks, 0.5f, 1.0f, 0.5f, 1.0f);
+
+        /* The reboot boots whatever the firmware prefers, and the stick is
+         * usually still attached and first: say so, or the install looks like it
+         * did nothing. */
+        const char *msg = "Remove the USB stick, then reboot to start it.";
+        float ms = 3.2f;
+        render_draw_text(msg, (w - render_text_width(msg, ms)) * 0.5f, h * 0.48f,
+                         ms, 0.9f, 0.9f, 0.9f, 1.0f);
+
+        const char *hint = "A: Reboot now    B: Stay in the live session";
         float hs = 3.0f;
         render_draw_text(hint, (w - render_text_width(hint, hs)) * 0.5f,
                          h - hs * 45.0f, hs, 0.9f, 0.9f, 0.9f, 1.0f);
@@ -377,8 +392,10 @@ installer_draw_stage(struct playos_shell *s, float w, float h)
     {
         char line[128];
         float ls = 3.2f;
-        snprintf(line, sizeof(line), "Step %d of %d", s->install_step + 1,
-                 s->install_count > 0 ? s->install_count : 8);
+        snprintf(line, sizeof(line), "Step %d of %d   %d%%",
+                 s->install_step + 1,
+                 s->install_count > 0 ? s->install_count : 8,
+                 s->install_percent < 0 ? 0 : s->install_percent);
         render_draw_text(line, (w - render_text_width(line, ls)) * 0.5f,
                          bar_y - 60.0f, ls, 0.9f, 0.9f, 0.9f, 1.0f);
         render_draw_text(s->install_step_name,

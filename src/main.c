@@ -926,6 +926,7 @@ main(int argc, char *argv[])
                 }
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_PROGRESS) == 0) {
                     /* S14.5-T4: the worker's progress, relayed by init. */
+                    s->install_stage_since = s->elapsed_time;
                     s->install_stage = SHELL_INSTALL_PROGRESS;
                     s->install_step = json_int_field(ev_json, "step", s->install_step);
                     s->install_percent = json_int_field(ev_json, "percent",
@@ -939,10 +940,12 @@ main(int argc, char *argv[])
                                  s->install_step_name);
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_COMPLETE) == 0) {
                     s->install_stage = SHELL_INSTALL_COMPLETE;
+                    s->install_stage_since = s->elapsed_time;
                     s->install_percent = 100;
-                    PLAYOS_LOG_I("shell", "install complete");
+                    PLAYOS_LOG_I("shell", "install complete - showing the success card");
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_ERROR) == 0) {
                     s->install_stage = SHELL_INSTALL_ERROR;
+                    s->install_stage_since = s->elapsed_time;
                     json_str_field(ev_json, "reason", s->install_error,
                                    sizeof(s->install_error));
                     if (!s->install_error[0])
