@@ -36,6 +36,40 @@
 #include "playos/playos_audio.h"
 #ifdef PLAYOS_TRUSTED_IPC
 #include "playos-runtime/trusted_control.h"
+/* S14.5-T4: minimal readers for event payloads. Until now the shell could only
+ * see an event's type (playos_trusted_shell_poll discards the body), which is why
+ * the update gauge had no number to show; the install stages need step, name,
+ * percent and reason, so we read them out of the raw JSON. */
+static int
+json_int_field(const char *json, const char *key, int fallback)
+{
+    char pat[32];
+    snprintf(pat, sizeof(pat), "\"%s\":", key);
+    const char *p = strstr(json, pat);
+    return p ? atoi(p + strlen(pat)) : fallback;
+}
+
+static void
+json_str_field(const char *json, const char *key, char *out, size_t outsz)
+{
+    char pat[32];
+    snprintf(pat, sizeof(pat), "\"%s\":\"", key);
+    out[0] = '\0';
+    const char *p = strstr(json, pat);
+    if (!p)
+        return;
+    p += strlen(pat);
+    const char *e = strchr(p, '"');
+    if (!e)
+        return;
+    size_t n = (size_t)(e - p);
+    if (n >= outsz)
+        n = outsz - 1;
+    memcpy(out, p, n);
+    out[n] = '\0';
+}
+
+
 #endif
 
 /* ── Global (for signal handler) ─────────────────────────────────────── */
@@ -855,8 +889,10 @@ main(int argc, char *argv[])
         /* Async game events streamed by playos-init (S7-T7). */
         if (shell_listener_fd >= 0) {
             char ev_type[64] = {0};
-            int r = playos_trusted_shell_poll(shell_listener_fd, ev_type,
-                                              sizeof(ev_type));
+            char ev_json[512] = {0};
+            int r = playos_trusted_shell_poll_json(shell_listener_fd, ev_type,
+                                                   sizeof(ev_type),
+                                                   ev_json, sizeof(ev_json));
             if (r == 1) {
                 if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_CRASHED) == 0) {
                     PLAYOS_LOG_W("shell", "async: game crashed");
@@ -887,6 +923,32 @@ main(int argc, char *argv[])
                     PLAYOS_LOG_I("shell", "async: performance profile changed");
                     s->last_status_refresh.tv_sec = 0;
                     s->last_status_refresh.tv_nsec = 0;
+                }
+                else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_PROGRESS) == 0) {
+                    /* S14.5-T4: the worker's progress, relayed by init. */
+                    s->install_stage = SHELL_INSTALL_PROGRESS;
+                    s->install_step = json_int_field(ev_json, "step", s->install_step);
+                    s->install_percent = json_int_field(ev_json, "percent",
+                                                        s->install_percent);
+                    if (s->install_count <= 0)
+                        s->install_count = 8;
+                    json_str_field(ev_json, "step_name", s->install_step_name,
+                                   sizeof(s->install_step_name));
+                    PLAYOS_LOG_I("shell", "install progress: step %d (%d%%) %s",
+                                 s->install_step, s->install_percent,
+                                 s->install_step_name);
+                } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_COMPLETE) == 0) {
+                    s->install_stage = SHELL_INSTALL_COMPLETE;
+                    s->install_percent = 100;
+                    PLAYOS_LOG_I("shell", "install complete");
+                } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_INSTALL_ERROR) == 0) {
+                    s->install_stage = SHELL_INSTALL_ERROR;
+                    json_str_field(ev_json, "reason", s->install_error,
+                                   sizeof(s->install_error));
+                    if (!s->install_error[0])
+                        snprintf(s->install_error, sizeof(s->install_error),
+                                 "Install failed");
+                    PLAYOS_LOG_W("shell", "install error: %s", s->install_error);
                 }
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_UPDATE_PROGRESS) == 0) {
                     /* playos-init streams this as a bare type string; the

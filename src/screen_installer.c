@@ -216,6 +216,28 @@ screen_installer_enter(struct playos_shell *s)
 void
 screen_installer_update(struct playos_shell *s)
 {
+    /* S14.5-T4: once the worker is running this screen shows its stages; the
+     * picker is unreachable until the install ends. */
+    if (s->install_stage == SHELL_INSTALL_PROGRESS)
+        return;                                  /* nothing to press mid-install */
+    if (s->install_stage == SHELL_INSTALL_COMPLETE) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            (void)playos_trusted_reboot(-1);
+            shell_set_toast(s, "Rebooting...");
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+            s->install_stage = SHELL_INSTALL_IDLE;
+            screen_installer_enter(s);
+        }
+        return;
+    }
+    if (s->install_stage == SHELL_INSTALL_ERROR) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH) ||
+            shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+            s->install_stage = SHELL_INSTALL_IDLE;
+            screen_installer_enter(s);
+        }
+        return;
+    }
     if (s->installer_count <= 0) {
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
             s->current_screen = SCREEN_SETTINGS;
@@ -237,10 +259,28 @@ screen_installer_update(struct playos_shell *s)
                 s->installer_confirm = false;
                 s->installer_hold_start = 0.0;
 #ifdef PLAYOS_TRUSTED_IPC
-                if (playos_trusted_start_installer_target(-1, target) == 0)
-                    shell_set_toast(s, "Starting installer…");
-                else
-                    shell_set_toast(s, "Installer start failed");
+                /* S14.5-T4: validate the target, then start the screen-less
+                 * worker. From here the shell owns the whole flow - progress,
+                 * completion and errors are drawn by this screen - so there is
+                 * no second fullscreen app and no visual seam. */
+                char prep_err[192] = {0};
+                if (playos_trusted_prepare_install(-1, target, prep_err,
+                                                   sizeof(prep_err)) != 0) {
+                    snprintf(s->install_error, sizeof(s->install_error), "%s",
+                             prep_err[0] ? prep_err : "Target cannot be installed");
+                    s->install_stage = SHELL_INSTALL_ERROR;
+                } else if (playos_trusted_start_installer_target(-1, target) != 0) {
+                    snprintf(s->install_error, sizeof(s->install_error),
+                             "Could not start the install");
+                    s->install_stage = SHELL_INSTALL_ERROR;
+                } else {
+                    s->install_stage = SHELL_INSTALL_PROGRESS;
+                    s->install_step = 0;
+                    s->install_count = 8;
+                    s->install_percent = 0;
+                    snprintf(s->install_step_name, sizeof(s->install_step_name),
+                             "Starting install...");
+                }
 #else
                 shell_set_toast(s, "Installer unavailable (no trusted IPC)");
 #endif
@@ -274,6 +314,78 @@ screen_installer_update(struct playos_shell *s)
     }
 }
 
+/* S14.5-T4: progress, completion and error, in the shell's own style. */
+static void
+installer_draw_stage(struct playos_shell *s, float w, float h)
+{
+    const char *title;
+    float title_scale = 9.0f;
+
+    if (s->install_stage == SHELL_INSTALL_COMPLETE)
+        title = "Installation complete";
+    else if (s->install_stage == SHELL_INSTALL_ERROR)
+        title = "Installation failed";
+    else
+        title = "Installing PlayOS";
+
+    render_draw_text(title, (w - render_text_width(title, title_scale)) * 0.5f,
+                     60.0f, title_scale, 1.0f, 1.0f, 1.0f, 1.0f);
+
+    float bar_w = w * 0.6f;
+    float bar_h = 26.0f;
+    float bar_x = (w - bar_w) * 0.5f;
+    float bar_y = h * 0.62f;
+    float progress = (s->install_stage == SHELL_INSTALL_COMPLETE)
+                     ? 1.0f : (float)s->install_percent / 100.0f;
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    render_draw_rect(bar_x, bar_y, bar_w, bar_h, 0.16f, 0.16f, 0.20f, 1.0f);
+    render_draw_rect(bar_x, bar_y, bar_w * progress, bar_h,
+                     0.47f, 0.27f, 0.78f, 1.0f);
+
+    if (s->install_stage == SHELL_INSTALL_ERROR) {
+        float ms = 3.6f;
+        render_draw_text(s->install_error,
+                         (w - render_text_width(s->install_error, ms)) * 0.5f,
+                         h * 0.45f, ms, 1.0f, 0.6f, 0.6f, 1.0f);
+        const char *hint = "A/B: Back to the disk picker";
+        float hs = 3.0f;
+        render_draw_text(hint, (w - render_text_width(hint, hs)) * 0.5f,
+                         h - hs * 45.0f, hs, 0.7f, 0.7f, 0.7f, 1.0f);
+        return;
+    }
+
+    if (s->install_stage == SHELL_INSTALL_COMPLETE) {
+        const char *msg = "PlayOS is installed. Reboot to start it.";
+        float ms = 3.6f;
+        render_draw_text(msg, (w - render_text_width(msg, ms)) * 0.5f, h * 0.45f,
+                         ms, 0.6f, 1.0f, 0.6f, 1.0f);
+        const char *hint = "A: Reboot now    B: Stay in PlayOS";
+        float hs = 3.0f;
+        render_draw_text(hint, (w - render_text_width(hint, hs)) * 0.5f,
+                         h - hs * 45.0f, hs, 0.9f, 0.9f, 0.9f, 1.0f);
+        return;
+    }
+
+    /* Progress: which step, its name, and how far along. */
+    {
+        char line[128];
+        float ls = 3.2f;
+        snprintf(line, sizeof(line), "Step %d of %d", s->install_step + 1,
+                 s->install_count > 0 ? s->install_count : 8);
+        render_draw_text(line, (w - render_text_width(line, ls)) * 0.5f,
+                         bar_y - 60.0f, ls, 0.9f, 0.9f, 0.9f, 1.0f);
+        render_draw_text(s->install_step_name,
+                         (w - render_text_width(s->install_step_name, ls)) * 0.5f,
+                         bar_y + bar_h + 28.0f, ls, 1.0f, 1.0f, 1.0f, 1.0f);
+        const char *hint = "Do not remove the USB stick";
+        float hs = 2.8f;
+        render_draw_text(hint, (w - render_text_width(hint, hs)) * 0.5f,
+                         h - hs * 45.0f, hs, 0.7f, 0.7f, 0.7f, 1.0f);
+    }
+}
+
 void
 screen_installer_draw(struct playos_shell *s)
 {
@@ -284,6 +396,12 @@ screen_installer_draw(struct playos_shell *s)
 
     float w = (float)s->output_width;
     float h = (float)s->output_height;
+
+    /* S14.5-T4: the worker's stages take over the screen entirely. */
+    if (s->install_stage != SHELL_INSTALL_IDLE) {
+        installer_draw_stage(s, w, h);
+        return;
+    }
 
     float title_scale = 9.0f;
     float title_w = render_text_width("Install PlayOS", title_scale);

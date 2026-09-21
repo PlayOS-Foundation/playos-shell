@@ -185,12 +185,28 @@ struct playos_shell {
      * init then hands the chosen disk to the installer (PLAYOS_INSTALL_TARGET)
      * so the destructive phase starts without asking again. */
 #define SHELL_INSTALLER_MAX_DISKS 8
+
+/* Install stages (S14.5-T4): the picker/confirm the user drives, then the three
+ * stages the worker's events move us through. */
+#define SHELL_INSTALL_IDLE      0
+#define SHELL_INSTALL_PROGRESS  1
+#define SHELL_INSTALL_COMPLETE  2
+#define SHELL_INSTALL_ERROR     3
     char   installer_path[SHELL_INSTALLER_MAX_DISKS][80];   /* /dev/nvme0n1 */
     char   installer_label[SHELL_INSTALLER_MAX_DISKS][96];  /* model + size  */
     int    installer_count;
     int    installer_cursor;
     bool   installer_confirm;       /* hold-A confirmation stage active */
     double installer_hold_start;    /* elapsed_time the A hold began, 0 = idle */
+
+    /* S14.5-T4: the shell draws the install itself - no second fullscreen app.
+     * The worker reports progress over the trusted socket and init relays it. */
+    int    install_stage;           /* SHELL_INSTALL_* */
+    int    install_step;            /* 0-based step the worker is on */
+    int    install_count;           /* steps in total */
+    int    install_percent;
+    char   install_step_name[64];
+    char   install_error[192];
 
     /* ── Transient toast (Sprint 11) ── */
     char   toast_msg[256];          /* message shown while toast_until active */
