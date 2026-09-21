@@ -349,8 +349,10 @@ settings_payload_on_device(const char *dev)
  * slot, not an ext2/ext4 filesystem with a rootfs.squashfs file in it. Removable
  * disks are tried first only to keep the common case fast. */
 static bool
-settings_install_payload_present(void)
+settings_install_payload_present(struct playos_shell *s)
 {
+    s->installer_payload_dev[0] = '\0';
+
     for (int pass = 0; pass < 2; pass++) {
         DIR *d = opendir("/sys/class/block");
         if (!d)
@@ -379,6 +381,11 @@ settings_install_payload_present(void)
                 continue;
 
             if (settings_payload_on_device(dev)) {
+                /* Remember *which* partition it was: the installer must read the
+                 * payload from here, and every name-based way of finding it again
+                 * is ambiguous (the internal disk has a playos-a too). */
+                snprintf(s->installer_payload_dev, sizeof(s->installer_payload_dev),
+                         "%s", dev);
                 closedir(d);
                 return true;
             }
@@ -410,7 +417,7 @@ screen_settings_enter(struct playos_shell *s)
     s->settings_power_cursor = 0;
     s->power_confirm = false;
     s->update_restart_confirm = false;
-    s->install_payload_present = settings_install_payload_present();
+    s->install_payload_present = settings_install_payload_present(s);
     if (s->install_payload_present)
         shell_set_toast(s, "Install PlayOS available (System tab, scroll down)");
     shell_refresh_boot_slot(s);

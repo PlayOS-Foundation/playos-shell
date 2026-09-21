@@ -207,6 +207,8 @@ struct playos_shell {
     int    install_percent;
     char   install_step_name[64];
     char   install_error[192];
+    char   installer_payload_dev[64]; /* the partition the payload was found on
+                                       * (content-verified by the payload check) */
 
     /* ── Transient toast (Sprint 11) ── */
     char   toast_msg[256];          /* message shown while toast_until active */

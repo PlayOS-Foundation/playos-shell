@@ -207,6 +207,7 @@ void
 screen_installer_enter(struct playos_shell *s)
 {
     s->installer_confirm = false;
+    s->install_stage = SHELL_INSTALL_IDLE;
     s->installer_hold_start = 0.0;
     installer_scan_disks(s);
     PLAYOS_LOG_I("shell", "installer front-end: %d candidate disk(s)",
@@ -269,7 +270,11 @@ screen_installer_update(struct playos_shell *s)
                     snprintf(s->install_error, sizeof(s->install_error), "%s",
                              prep_err[0] ? prep_err : "Target cannot be installed");
                     s->install_stage = SHELL_INSTALL_ERROR;
-                } else if (playos_trusted_start_installer_target(-1, target) != 0) {
+                } else if (playos_trusted_start_installer_target(-1, target,
+                                     s->installer_payload_dev) != 0) {
+                    /* Synchronous: init answers whether the worker really started,
+                     * so a failure here becomes an error card instead of a
+                     * progress screen that can never advance. */
                     snprintf(s->install_error, sizeof(s->install_error),
                              "Could not start the install");
                     s->install_stage = SHELL_INSTALL_ERROR;
