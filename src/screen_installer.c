@@ -292,12 +292,21 @@ screen_installer_update(struct playos_shell *s)
                     snprintf(s->install_step_name, sizeof(s->install_step_name),
                              "Starting install...");
                 }
+                /* S14.5-T4/T5: stay on this screen. The shell draws the progress,
+                 * the success card and the error card itself now, and switching
+                 * to Settings here is exactly what made a full, successful
+                 * install invisible on hardware: the shell logged all eight steps
+                 * and "install complete - showing the success card" while the
+                 * user watched the Settings screen. The old handoff had to step
+                 * aside for a separate installer app; there is no such app on this
+                 * path. */
+                return;
 #else
                 shell_set_toast(s, "Installer unavailable (no trusted IPC)");
-#endif
                 s->current_screen = SCREEN_SETTINGS;
                 screen_settings_enter(s);
                 return;
+#endif
             }
         } else {
             s->installer_hold_start = 0.0;
