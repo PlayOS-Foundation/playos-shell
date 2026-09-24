@@ -37,7 +37,7 @@
 #define NET_JSON_MAX  16384
 #define NET_RESCAN_S  20.0      /* idle refresh */
 #define NET_STATUS_S  3.0       /* link-state poll */
-#define NET_VISIBLE   8         /* rows shown at once */
+#define NET_VISIBLE   6         /* rows shown at once (leave room for header) */
 
 typedef struct {
     char ssid[NET_SSID_MAX];
@@ -621,11 +621,16 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             *y += row_h;
         }
 
-        if (g.count > NET_VISIBLE)
-            snprintf(line, sizeof(line), "%d of %d networks", g.cursor + 1,
-                     g.count);
-        else
+        if (g.count > NET_VISIBLE) {
+            int last_shown = g.top + NET_VISIBLE;
+            if (last_shown > g.count)
+                last_shown = g.count;
+            snprintf(line, sizeof(line), "%s%d-%d of %d%s",
+                     g.top > 0 ? "^ " : "", g.top + 1, last_shown, g.count,
+                     last_shown < g.count ? " v" : "");
+        } else {
             snprintf(line, sizeof(line), "%d networks", g.count);
+        }
         *y += 4.0f * label_scale;
         render_draw_text(line, x, *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
         *y += row_h;

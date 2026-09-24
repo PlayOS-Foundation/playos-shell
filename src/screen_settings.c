@@ -606,8 +606,13 @@ screen_settings_update(struct playos_shell *s)
             display_adjust_brightness(s, 5);
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN))
             display_adjust_brightness(s, -5);
-    } else {
-        /* Read-only tabs: scroll the info block so it can grow later. */
+    } else if (s->settings_tab != TAB_NETWORK) {
+        /* Read-only tabs: scroll the info block so it can grow later.
+         *
+         * The Network tab is deliberately excluded: its panel keeps its own
+         * selection cursor and scroll window, so moving the whole content block
+         * on the same d-pad press scrolled the list out from under the cursor
+         * (it looked like the list would not scroll at all). */
         float step = settings_line_step(s);
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP))
             s->settings_content_scroll -= step;
