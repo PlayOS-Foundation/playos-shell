@@ -55,9 +55,10 @@ static struct {
     int    have_scanned;
     double next_scan;
 
-    /* keyboard state: letters vs digits/symbols, and caps-lock */
+    /* keyboard state: letters vs digits/symbols, caps-lock, password visible */
     int    kb_sym;
     int    kb_caps;
+    int    kb_show;
 
     /* link state, polled from NetworkStatus */
     char   state[24];
@@ -391,6 +392,7 @@ static void kb_reset(void)
     g.kb_col = 0;
     g.kb_caps = 0;
     g.kb_sym = 0;
+    g.kb_show = 0;
 }
 
 static void kb_type(char c)
@@ -434,10 +436,10 @@ void screen_network_update(struct playos_shell *s)
 
     if (g.kb_open) {
         /* Rows 0..KB_NROWS-1 are the character grid; row KB_NROWS is a control
-         * row (CAPS, 123/ABC, SPACE, DEL). Deliberately NOT on the shoulder
-         * buttons: L1/R1 already belong to the settings screen's tab switching. */
+         * row (CAPS, 123/ABC, SPACE, DEL, SHOW/HIDE). Deliberately NOT on the
+         * shoulder buttons: L1/R1 already belong to the settings screen. */
         const int ctrl_row = KB_NROWS;
-        int row_len = (g.kb_row == ctrl_row) ? 4
+        int row_len = (g.kb_row == ctrl_row) ? 5
                                              : (int)strlen(KB_ROWS[g.kb_row]);
 
         if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
@@ -454,7 +456,8 @@ void screen_network_update(struct playos_shell *s)
                 case 0:  g.kb_caps = !g.kb_caps; break;
                 case 1:  g.kb_sym = !g.kb_sym;   break;
                 case 2:  kb_type(' ');           break;
-                default: kb_delete();            break;
+                case 3:  kb_delete();            break;
+                default: g.kb_show = !g.kb_show; break;
                 }
             } else {
                 kb_type(KB_ROWS[g.kb_row][g.kb_col]);
@@ -475,8 +478,9 @@ void screen_network_update(struct playos_shell *s)
             }
         }
 
-        /* The row may have changed shape; keep the column inside it. */
-        int cols = (g.kb_row == ctrl_row) ? 4 : (int)strlen(KB_ROWS[g.kb_row]);
+        /* The row may have changed shape; keep the column inside it. Five keys
+         * on the control row, so SHOW/HIDE (the last one) stays reachable. */
+        int cols = (g.kb_row == ctrl_row) ? 5 : (int)strlen(KB_ROWS[g.kb_row]);
         if (g.kb_col >= cols)
             g.kb_col = cols - 1;
         if (g.kb_col < 0)
@@ -587,7 +591,7 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
          * where typing goes, and a lone dash means nothing typed yet. */
         char masked[NET_PASS_MAX + 2];
         for (int i = 0; i < g.pass_len; i++)
-            masked[i] = '*';
+            masked[i] = g.kb_show ? g.pass[i] : '*';
 
         if (g.pass_len == 0) {
             masked[0] = '-';
@@ -648,23 +652,25 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             *y += kb_rh * 1.12f;
         }
 
-        /* Control row: CAPS, letters<->digits, SPACE, DEL. On the grid rather
-         * than on a shoulder button, which the settings screen already uses. */
+        /* Control row: CAPS, letters<->digits, SPACE, DEL, SHOW/HIDE. On the
+         * grid rather than on a shoulder button, which the settings screen
+         * already uses. */
         {
-            const char *labels[4];
+            const char *labels[5];
             labels[0] = g.kb_caps ? "CAPS*" : "caps";
             labels[1] = g.kb_sym ? "abc" : "123";
             labels[2] = "SPACE";
             labels[3] = "DEL";
+            labels[4] = g.kb_show ? "HIDE" : "SHOW";
 
-            float ccell = (((float)s->output_width - 2.0f * x) * 0.94f) / 4.08f;
+            float ccell = (((float)s->output_width - 2.0f * x) * 0.94f) / 5.10f;
             float cx = x;
 
-            for (int c = 0; c < 4; c++) {
+            for (int c = 0; c < 5; c++) {
                 if (g.kb_row == KB_NROWS && c == g.kb_col)
                     render_draw_rect(cx, *y, ccell, kb_rh,
                                      0.20f, 0.45f, 0.85f, 0.85f);
-                else if (c == 0 && g.kb_caps)
+                else if ((c == 0 && g.kb_caps) || (c == 4 && g.kb_show))
                     render_draw_rect(cx, *y, ccell, kb_rh,
                                      0.85f, 0.45f, 0.15f, 0.85f);
 
