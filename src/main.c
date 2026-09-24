@@ -82,6 +82,14 @@ static Sound g_nav_sound     = { 0 };
 static Sound g_confirm_sound = { 0 };
 static bool  g_audio_ready   = false;
 
+/* ADR-0007: audio has one foreground owner. A game owns the playback PCM while
+ * it is foreground, so the shell must close its own device when a game starts —
+ * otherwise the shell keeps hw:1,0 open for its UI tones and the game's ALSA
+ * "default" (dmix) fails with "unable to open slave", leaving the game silent.
+ * The shell re-acquires the device as soon as the game is gone. */
+static bool   g_game_foreground  = false;
+static double g_audio_next_retry = 0.0;
+
 #define SHELL_TAU 6.283185307179586f
 
 static Sound
@@ -168,13 +176,17 @@ shell_audio_bootstrap(void)
     if (g_audio_ready)
         return;
 
-    static double next_retry = 0.0;
+    /* A foreground game owns the playback device (ADR-0007); do not steal it
+     * back until that game is gone. */
+    if (g_game_foreground)
+        return;
+
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    if (now < next_retry)
+    if (now < g_audio_next_retry)
         return;
-    next_retry = now + 1.0;   /* at most once per second */
+    g_audio_next_retry = now + 1.0;   /* at most once per second */
 
     InitAudioDevice();
     g_audio_ready = IsAudioDeviceReady();
@@ -199,15 +211,41 @@ shell_audio_bootstrap(void)
 static void
 shell_audio_shutdown(void)
 {
-    if (!g_audio_ready)
-        return;
+    if (g_audio_ready) {
+        if (IsSoundValid(g_nav_sound))
+            UnloadSound(g_nav_sound);
+        if (IsSoundValid(g_confirm_sound))
+            UnloadSound(g_confirm_sound);
 
-    if (IsSoundValid(g_nav_sound))
-        UnloadSound(g_nav_sound);
-    if (IsSoundValid(g_confirm_sound))
-        UnloadSound(g_confirm_sound);
+        CloseAudioDevice();
+    }
 
-    CloseAudioDevice();
+    /* Safe to call repeatedly; afterwards the bootstrap re-acquires the device
+     * (rebuilding the tones) as soon as it is allowed to. */
+    g_nav_sound = (Sound){ 0 };
+    g_confirm_sound = (Sound){ 0 };
+    g_audio_ready = false;
+    g_audio_next_retry = 0.0;
+}
+
+/* Hand the playback PCM to a game that is about to render (ADR-0007). */
+static void
+shell_audio_release_for_game(void)
+{
+    if (!g_game_foreground)
+        PLAYOS_LOG_I("shell", "audio: releasing playback device for the game");
+    g_game_foreground = true;
+    shell_audio_shutdown();
+}
+
+/* Take it back once the game has exited or crashed. */
+static void
+shell_audio_reacquire(void)
+{
+    if (g_game_foreground)
+        PLAYOS_LOG_I("shell", "audio: game gone - re-acquiring playback device");
+    g_game_foreground = false;
+    g_audio_next_retry = 0.0;     /* re-open on the next frame */
 }
 
 /* ── Analog sticks/triggers (Sprint 12 responsiveness fix) ─────────────
@@ -898,10 +936,13 @@ main(int argc, char *argv[])
                     PLAYOS_LOG_W("shell", "async: game crashed");
                     s->is_suspended = false;
                     s->game_running = false;
+                    /* Even a crash must hand the playback device back. */
+                    shell_audio_reacquire();
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_EXITED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game exited");
                     s->is_suspended = false;
                     s->game_running = false;
+                    shell_audio_reacquire();
                 } else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_GAME_STARTED) == 0) {
                     PLAYOS_LOG_I("shell", "async: game started");
                     s->game_running = true;
@@ -911,6 +952,8 @@ main(int argc, char *argv[])
                      * for an invisible window (the cause of in-game volume
                      * keys not being drained until the game exits). */
                     s->is_suspended = true;
+                    /* The game owns the playback PCM from here (ADR-0007). */
+                    shell_audio_release_for_game();
                 }
                 else if (strcmp(ev_type, PLAYOS_TRUSTED_EVENT_COMPOSITOR_STATE_CHANGED) == 0)
                     PLAYOS_LOG_I("shell", "async: compositor state changed");
