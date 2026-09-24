@@ -581,15 +581,28 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
 
     /* ── Passphrase entry ──────────────────────────────────────────── */
     if (g.kb_open) {
-        char masked[NET_PASS_MAX + 1];
+        /* Right-aligned like every other value row, so the mask can never be
+         * drawn over the label — at a fixed 12*txt offset it landed *inside*
+         * "PASSPHRASE" and rendered as "PAS****RASE". A trailing cursor shows
+         * where typing goes, and a lone dash means nothing typed yet. */
+        char masked[NET_PASS_MAX + 2];
         for (int i = 0; i < g.pass_len; i++)
             masked[i] = '*';
-        masked[g.pass_len] = '\0';
 
-        render_draw_text("Passphrase", x, *y, label_scale,
+        if (g.pass_len == 0) {
+            masked[0] = '-';
+            masked[1] = '\0';
+        } else {
+            masked[g.pass_len] = '_';
+            masked[g.pass_len + 1] = '\0';
+        }
+
+        render_draw_text("Passphrase", x, *y, small,
                          0.6f, 0.6f, 0.7f, 1.0f);
-        render_draw_text(masked, x + 12.0f * txt, *y, txt,
-                         0.95f, 0.95f, 0.6f, 1.0f);
+        render_draw_text(masked,
+                         (float)s->output_width - x -
+                             render_text_width(masked, txt),
+                         *y, txt, 0.95f, 0.95f, 0.6f, 1.0f);
         *y += row_h * 1.2f;
 
         /* Spread the keys across the content width. Sizing them from the glyph
