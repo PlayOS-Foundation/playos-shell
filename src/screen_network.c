@@ -511,13 +511,21 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                          float label_scale, float value_scale)
 {
     char line[160];
-    float row_h = 30.0f * label_scale;
+
+    /* The settings screen sizes a row at 30*label_scale, which is ~4x the glyph
+     * height — that left the panel looking empty and its text smaller than the
+     * chrome around it. Work from the font instead: fontSize = scale*7, so a
+     * row of 10*scale has the text filling ~70% of it, and pick a text scale a
+     * touch larger than the tab labels (0.6*header_scale) so content reads
+     * first and chrome second. */
+    float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
+    float txt = header_scale * 0.7f;
+    float small = txt * 0.78f;
+    float row_h = txt * 10.0f;
 
     /* Bottom of the scrolled viewport. Mirrors settings_content_bottom() in
      * screen_settings.c: the panel gets the top of the content area (as *y)
-     * but not its bottom, and at 1080p a row is ~68px tall — so without this
-     * the list and the on-screen keyboard ran off the bottom of the screen. */
-    float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
+     * but not its bottom, so it has to know where to stop. */
     float content_bottom = (float)s->output_height - header_scale * 22.0f;
 
     /* ── Link state ────────────────────────────────────────────────── */
@@ -529,22 +537,22 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
     else
         snprintf(line, sizeof(line), "Not connected");
 
-    render_draw_text("Wi-Fi", x, *y, label_scale, 0.6f, 0.6f, 0.7f, 1.0f);
+    render_draw_text("Wi-Fi", x, *y, small, 0.6f, 0.6f, 0.7f, 1.0f);
     render_draw_text(line,
                      (float)s->output_width - x -
-                         render_text_width(line, value_scale),
-                     *y, value_scale, 0.9f, 0.9f, 0.9f, 1.0f);
+                         render_text_width(line, txt),
+                     *y, txt, 0.9f, 0.9f, 0.9f, 1.0f);
     *y += row_h;
 
     if (g.ip[0]) {
-        render_draw_text("IP", x, *y, label_scale, 0.6f, 0.6f, 0.7f, 1.0f);
+        render_draw_text("IP", x, *y, small, 0.6f, 0.6f, 0.7f, 1.0f);
         render_draw_text(g.ip,
                          (float)s->output_width - x -
-                             render_text_width(g.ip, value_scale),
-                         *y, value_scale, 0.9f, 0.9f, 0.9f, 1.0f);
+                             render_text_width(g.ip, txt),
+                         *y, txt, 0.9f, 0.9f, 0.9f, 1.0f);
         *y += row_h;
     }
-    *y += 6.0f * label_scale;
+    *y += txt * 2.0f;
 
     /* ── Passphrase entry ──────────────────────────────────────────── */
     if (g.kb_open) {
@@ -555,67 +563,74 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
 
         render_draw_text("Passphrase", x, *y, label_scale,
                          0.6f, 0.6f, 0.7f, 1.0f);
-        render_draw_text(masked, x + 150.0f * label_scale, *y, value_scale,
+        render_draw_text(masked, x + 12.0f * txt, *y, txt,
                          0.95f, 0.95f, 0.6f, 1.0f);
-        *y += row_h * 1.4f;
+        *y += row_h * 1.2f;
 
-        /* Shrink the keys to whatever is left below the passphrase line (minus
-         * the hint row) instead of letting the last keyboard row fall off the
-         * bottom of the viewport. */
-        float kb_rh = row_h * 0.9f;
-        float kb_avail = content_bottom - *y - row_h * 1.2f;   /* hint row */
+        /* Spread the keys across the content width. Sizing them from the glyph
+         * width left the whole keyboard ~165px wide on a 1920px screen — about
+         * 8% of it, and the smallest text on the display. Key height follows
+         * the width, capped by the height left below the passphrase line. */
+        float cell = (((float)s->output_width - 2.0f * x) * 0.94f) / 10.2f;
+        float kb_rh = cell * 1.15f;
+
+        float kb_avail = content_bottom - *y - row_h;          /* hint row */
         if (kb_avail > 0.0f && kb_avail / (float)KB_NROWS < kb_rh)
             kb_rh = kb_avail / (float)KB_NROWS;
-        if (kb_rh < row_h * 0.45f)
-            kb_rh = row_h * 0.45f;
+        if (kb_rh < txt * 4.0f)
+            kb_rh = txt * 4.0f;
 
-        float kb_scale = value_scale * (kb_rh / (row_h * 0.9f));
-        float cell = render_text_width("M", kb_scale) * 1.7f;
+        /* Glyphs stay at the content text size (a shade larger) and are centred
+         * in their key rather than filling it edge to edge. */
+        float kb_scale = kb_rh * 0.5f / 7.0f;
+        if (kb_scale > txt * 1.15f)
+            kb_scale = txt * 1.15f;
 
         for (int r = 0; r < KB_NROWS; r++) {
             const char *row = KB_ROWS[r];
-            float cx = x + 8.0f * label_scale;
+            float cx = x;
 
             for (int c = 0; row[c]; c++) {
-                if (r == g.kb_row && c == g.kb_col) {
-                    render_draw_rect(cx - 3.0f * label_scale, *y - 2.0f,
-                                     cell, kb_rh, 0.20f, 0.45f, 0.85f, 0.85f);
-                }
+                if (r == g.kb_row && c == g.kb_col)
+                    render_draw_rect(cx, *y, cell, kb_rh,
+                                     0.20f, 0.45f, 0.85f, 0.85f);
+
                 char ch[2] = { row[c], '\0' };
-                render_draw_text(ch, cx, *y, kb_scale,
-                                 0.95f, 0.95f, 0.95f, 1.0f);
-                cx += cell;
+                render_draw_text(ch,
+                                 cx + (cell - render_text_width(ch, kb_scale)) * 0.5f,
+                                 *y + (kb_rh - kb_scale * 7.0f) * 0.5f,
+                                 kb_scale, 0.95f, 0.95f, 0.95f, 1.0f);
+                cx += cell * 1.02f;
             }
-            *y += kb_rh;
+            *y += kb_rh * 1.12f;
         }
 
-        *y += 4.0f * label_scale;
+        *y += txt * 2.0f;
         render_draw_text("A type   B delete   X cancel   Y connect",
-                         x, *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+                         x, *y, small, 0.55f, 0.55f, 0.65f, 1.0f);
         *y += row_h;
         return;
     }
 
     /* ── Scan list ─────────────────────────────────────────────────── */
     if (g.scanning && !g.have_scanned) {
-        render_draw_text("Scanning...", x, *y, value_scale,
-                         0.8f, 0.8f, 0.8f, 1.0f);
+        render_draw_text("Scanning...", x, *y, txt, 0.8f, 0.8f, 0.8f, 1.0f);
         *y += row_h;
     } else if (g.count == 0) {
         render_draw_text(g.have_scanned ? "No networks found"
                                         : "Press Y to scan",
-                         x, *y, value_scale, 0.8f, 0.8f, 0.8f, 1.0f);
+                         x, *y, txt, 0.8f, 0.8f, 0.8f, 1.0f);
         *y += row_h;
     } else {
         /* Fit the list into the space actually left: two rows are reserved for
-         * the count line and the control hints, and the rows shrink (down to
-         * half height) so at least four of them are visible. */
+         * the count line and the control hints, and the rows shrink (but only
+         * to 60% of the standard pitch) so at least four stay visible. */
         float list_avail = content_bottom - *y - row_h * 2.0f;
         float rh = row_h;
         if (list_avail > 0.0f && list_avail / 4.0f < rh)
             rh = list_avail / 4.0f;
-        if (rh < row_h * 0.5f)
-            rh = row_h * 0.5f;
+        if (rh < row_h * 0.6f)
+            rh = row_h * 0.6f;
 
         int visible = (list_avail > 0.0f) ? (int)(list_avail / rh) : 1;
         if (visible < 1)
@@ -624,7 +639,11 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             visible = NET_MAX_AP;
         g.visible = visible;
 
-        float rscale = value_scale * (rh / row_h);
+        /* Text fills ~70% of whatever row height we ended up with, so the SSIDs
+         * are never smaller than the chrome around them (they used to come out
+         * at ~10px against 22px tab labels because the row was scaled down
+         * while the text scale was taken from the settings' own convention). */
+        float rscale = rh / 10.0f;
 
         int last = g.top + visible;
         if (last > g.count)
@@ -641,7 +660,7 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             render_draw_text(ap->ssid, x, *y, rscale, 1.0f, 1.0f, 1.0f, 1.0f);
 
             /* Signal bars, drawn right of the SSID column. */
-            float bx = x + 300.0f * label_scale;
+            float bx = x + 21.0f * txt;
             int bars = bars_for(ap->dbm);
             for (int b = 0; b < 4; b++) {
                 float bh = (float)(b + 1) * rh * 0.12f;
@@ -654,12 +673,12 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                                  b < bars ? 1.0f : 0.5f);
             }
 
-            render_draw_text(ap->security, (float)s->output_width - x - 90.0f,
-                             *y, label_scale, 0.6f, 0.8f, 1.0f, 1.0f);
+            render_draw_text(ap->security, (float)s->output_width - x - 9.0f * txt,
+                             *y, rscale * 0.9f, 0.6f, 0.8f, 1.0f, 1.0f);
 
             snprintf(line, sizeof(line), "%d", ap->dbm);
-            render_draw_text(line, (float)s->output_width - x - 40.0f,
-                             *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+            render_draw_text(line, (float)s->output_width - x - 5.0f * txt,
+                             *y, rscale * 0.9f, 0.55f, 0.55f, 0.65f, 1.0f);
 
             *y += rh;
         }
@@ -674,20 +693,20 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
         } else {
             snprintf(line, sizeof(line), "%d networks", g.count);
         }
-        *y += 4.0f * label_scale;
-        render_draw_text(line, x, *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+        *y += txt;
+        render_draw_text(line, x, *y, small, 0.55f, 0.55f, 0.65f, 1.0f);
         *y += row_h;
     }
 
     /* ── Message + controls ────────────────────────────────────────── */
     if (g.message[0]) {
-        render_draw_text(g.message, x, *y, label_scale,
+        render_draw_text(g.message, x, *y, small,
                          0.95f, 0.85f, 0.45f, 1.0f);
         *y += row_h;
     }
 
     render_draw_text("A connect   Y rescan   X disconnect", x, *y,
-                     label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+                     small, 0.55f, 0.55f, 0.65f, 1.0f);
     *y += row_h;
 }
 
