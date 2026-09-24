@@ -198,21 +198,35 @@ static void scan_start(void)
     }
 
     if (pid == 0) {
-        /* Child: only the request, then the JSON to the parent. */
+        /* Child: make the request and hand the result to the parent.
+         *
+         * Deliberately allocation-free (this is a fork of a threaded process —
+         * the audio thread can hold the allocator lock across the fork) and
+         * deliberately talkative: the first line is the request's return value,
+         * so a failure here is diagnosable from the parent's log instead of
+         * just surfacing as "scan failed". */
         close(pfd[0]);
+
+        /* The runtime library signals success with 0 and leaves the JSON in the
+         * buffer, NUL-terminated — it does NOT return a length. Reading it as a
+         * length made every successful scan look like a failure. */
+        int rc = -1;
 #ifdef PLAYOS_TRUSTED_IPC
-        char *buf = malloc(NET_JSON_MAX);
-        if (buf) {
-            int n = playos_trusted_scan_networks(-1, buf, NET_JSON_MAX);
-            if (n > 0) {
-                ssize_t w = write(pfd[1], buf, (size_t)n);
-                (void)w;
-            }
-            free(buf);
-        }
-#else
-        (void)pfd;
+        rc = playos_trusted_scan_networks(-1, g_scan_buf, sizeof(g_scan_buf));
 #endif
+        size_t len = (rc >= 0) ? strlen(g_scan_buf) : 0;
+
+        char hdr[48];
+        int hl = snprintf(hdr, sizeof(hdr), "rc=%d len=%zu\n", rc, len);
+        if (hl > 0) {
+            ssize_t w = write(pfd[1], hdr, (size_t)hl);
+            (void)w;
+        }
+        if (len > 0) {
+            ssize_t w = write(pfd[1], g_scan_buf, len);
+            (void)w;
+        }
+
         _exit(0);
     }
 
@@ -255,13 +269,36 @@ static void scan_poll(void)
     g.scanning = 0;
     g.next_scan = now_s() + NET_RESCAN_S;
 
-    if (g_scan_len > 0) {
-        parse_networks(g_scan_buf);
+    if (WIFSIGNALED(status))
+        PLAYOS_LOG_W("net", "scan child killed by signal %d", WTERMSIG(status));
+    else
+        PLAYOS_LOG_I("net", "scan child exited with %d", WEXITSTATUS(status));
+
+    /* Child's wire format: "rc=<int> len=<n>\n" then the JSON body. Log both
+     * either way, so a failure is diagnosable from the log and not only from a
+     * message on screen. */
+    int ret = -1;
+    size_t blen = 0;
+    char *body = strchr(g_scan_buf, '\n');
+    int have_hdr = (g_scan_len > 0 &&
+                    sscanf(g_scan_buf, "rc=%d len=%zu", &ret, &blen) == 2);
+
+    if (have_hdr)
+        PLAYOS_LOG_I("net", "scan child: rc=%d, %zu byte body", ret, blen);
+    else
+        PLAYOS_LOG_W("net", "scan child: %zu bytes, no header (crashed?)",
+                     g_scan_len);
+
+    if (have_hdr && ret == 0 && body && body[1]) {
+        parse_networks(body + 1);
         g.have_scanned = 1;
         PLAYOS_LOG_I("net", "scan: %d network(s)", g.count);
+        snprintf(g.message, sizeof(g.message), "%d network(s)", g.count);
+    } else if (!have_hdr && g_scan_len == 0) {
+        snprintf(g.message, sizeof(g.message), "Scan helper died");
     } else {
         snprintf(g.message, sizeof(g.message),
-                 "Scan failed - is Wi-Fi up?");
+                 "Scan failed (request returned %d)", ret);
     }
 }
 
@@ -272,7 +309,7 @@ static void status_poll(void)
 
 #ifdef PLAYOS_TRUSTED_IPC
     static char buf[1024];
-    if (playos_trusted_network_status(-1, buf, sizeof(buf)) <= 0)
+    if (playos_trusted_network_status(-1, buf, sizeof(buf)) < 0)
         return;
 
     char st[24] = {0}, ssid[NET_SSID_MAX] = {0}, ip[64] = {0};
@@ -293,9 +330,9 @@ static void connect_to(const net_ap *ap, const char *psk)
 
 #ifdef PLAYOS_TRUSTED_IPC
     static char buf[1024];
-    int n = playos_trusted_connect_network(-1, ap->ssid, psk, ap->security,
-                                           buf, sizeof(buf));
-    if (n <= 0) {
+    int rc = playos_trusted_connect_network(-1, ap->ssid, psk, ap->security,
+                                            buf, sizeof(buf));
+    if (rc < 0) {
         snprintf(g.message, sizeof(g.message), "Connect request failed");
         return;
     }
