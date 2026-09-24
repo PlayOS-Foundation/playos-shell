@@ -69,6 +69,10 @@ static struct {
     int    kb_col;
 
     char   message[96];
+
+    /* Rows the list can actually show, recomputed every draw from the real
+     * viewport height (a fixed count put the cursor off the bottom). */
+    int    visible;
 } g;
 
 /* ── small helpers ────────────────────────────────────────────────────── */
@@ -485,11 +489,12 @@ void screen_network_update(struct playos_shell *s)
         disconnect_radio();
     }
 
-    /* Keep the cursor inside the visible window. */
+    /* Keep the cursor inside the window the last draw could actually show. */
+    int vis = g.visible > 0 ? g.visible : NET_VISIBLE;
     if (g.cursor < g.top)
         g.top = g.cursor;
-    if (g.cursor >= g.top + NET_VISIBLE)
-        g.top = g.cursor - NET_VISIBLE + 1;
+    if (g.cursor >= g.top + vis)
+        g.top = g.cursor - vis + 1;
 }
 
 /* Signal strength → 0..4 bars. */
@@ -507,6 +512,13 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
 {
     char line[160];
     float row_h = 30.0f * label_scale;
+
+    /* Bottom of the scrolled viewport. Mirrors settings_content_bottom() in
+     * screen_settings.c: the panel gets the top of the content area (as *y)
+     * but not its bottom, and at 1080p a row is ~68px tall — so without this
+     * the list and the on-screen keyboard ran off the bottom of the screen. */
+    float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
+    float content_bottom = (float)s->output_height - header_scale * 22.0f;
 
     /* ── Link state ────────────────────────────────────────────────── */
     const char *state_txt = g.state[0] ? g.state : "off";
@@ -547,7 +559,19 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                          0.95f, 0.95f, 0.6f, 1.0f);
         *y += row_h * 1.4f;
 
-        float cell = 24.0f * label_scale;
+        /* Shrink the keys to whatever is left below the passphrase line (minus
+         * the hint row) instead of letting the last keyboard row fall off the
+         * bottom of the viewport. */
+        float kb_rh = row_h * 0.9f;
+        float kb_avail = content_bottom - *y - row_h * 1.2f;   /* hint row */
+        if (kb_avail > 0.0f && kb_avail / (float)KB_NROWS < kb_rh)
+            kb_rh = kb_avail / (float)KB_NROWS;
+        if (kb_rh < row_h * 0.45f)
+            kb_rh = row_h * 0.45f;
+
+        float kb_scale = value_scale * (kb_rh / (row_h * 0.9f));
+        float cell = render_text_width("M", kb_scale) * 1.7f;
+
         for (int r = 0; r < KB_NROWS; r++) {
             const char *row = KB_ROWS[r];
             float cx = x + 8.0f * label_scale;
@@ -555,14 +579,14 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             for (int c = 0; row[c]; c++) {
                 if (r == g.kb_row && c == g.kb_col) {
                     render_draw_rect(cx - 3.0f * label_scale, *y - 2.0f,
-                                     cell, row_h, 0.20f, 0.45f, 0.85f, 0.85f);
+                                     cell, kb_rh, 0.20f, 0.45f, 0.85f, 0.85f);
                 }
                 char ch[2] = { row[c], '\0' };
-                render_draw_text(ch, cx, *y, value_scale,
+                render_draw_text(ch, cx, *y, kb_scale,
                                  0.95f, 0.95f, 0.95f, 1.0f);
                 cx += cell;
             }
-            *y += row_h * 1.1f;
+            *y += kb_rh;
         }
 
         *y += 4.0f * label_scale;
@@ -583,7 +607,26 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                          x, *y, value_scale, 0.8f, 0.8f, 0.8f, 1.0f);
         *y += row_h;
     } else {
-        int last = g.top + NET_VISIBLE;
+        /* Fit the list into the space actually left: two rows are reserved for
+         * the count line and the control hints, and the rows shrink (down to
+         * half height) so at least four of them are visible. */
+        float list_avail = content_bottom - *y - row_h * 2.0f;
+        float rh = row_h;
+        if (list_avail > 0.0f && list_avail / 4.0f < rh)
+            rh = list_avail / 4.0f;
+        if (rh < row_h * 0.5f)
+            rh = row_h * 0.5f;
+
+        int visible = (list_avail > 0.0f) ? (int)(list_avail / rh) : 1;
+        if (visible < 1)
+            visible = 1;
+        if (visible > NET_MAX_AP)
+            visible = NET_MAX_AP;
+        g.visible = visible;
+
+        float rscale = value_scale * (rh / row_h);
+
+        int last = g.top + visible;
         if (last > g.count)
             last = g.count;
 
@@ -593,18 +636,18 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             if (i == g.cursor)
                 render_draw_rect(x - 6.0f, *y - 3.0f,
                                  (float)s->output_width - 2.0f * x + 12.0f,
-                                 row_h, 0.20f, 0.45f, 0.85f, 0.55f);
+                                 rh, 0.20f, 0.45f, 0.85f, 0.55f);
 
-            render_draw_text(ap->ssid, x, *y, value_scale, 1.0f, 1.0f, 1.0f, 1.0f);
+            render_draw_text(ap->ssid, x, *y, rscale, 1.0f, 1.0f, 1.0f, 1.0f);
 
             /* Signal bars, drawn right of the SSID column. */
             float bx = x + 300.0f * label_scale;
             int bars = bars_for(ap->dbm);
             for (int b = 0; b < 4; b++) {
-                float bh = (float)(b + 1) * 3.0f * label_scale;
-                render_draw_rect(bx + (float)b * 6.0f * label_scale,
-                                 *y + (12.0f * label_scale - bh),
-                                 4.0f * label_scale, bh,
+                float bh = (float)(b + 1) * rh * 0.12f;
+                render_draw_rect(bx + (float)b * rh * 0.09f,
+                                 *y + (rh * 0.55f - bh),
+                                 rh * 0.06f, bh,
                                  b < bars ? 0.45f : 0.35f,
                                  b < bars ? 0.95f : 0.35f,
                                  b < bars ? 0.55f : 0.35f,
@@ -618,11 +661,11 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             render_draw_text(line, (float)s->output_width - x - 40.0f,
                              *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
 
-            *y += row_h;
+            *y += rh;
         }
 
-        if (g.count > NET_VISIBLE) {
-            int last_shown = g.top + NET_VISIBLE;
+        if (g.count > visible) {
+            int last_shown = g.top + visible;
             if (last_shown > g.count)
                 last_shown = g.count;
             snprintf(line, sizeof(line), "%s%d-%d of %d%s",
