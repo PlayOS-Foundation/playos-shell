@@ -433,35 +433,32 @@ void screen_network_update(struct playos_shell *s)
         scan_start();
 
     if (g.kb_open) {
-        const char *row = KB_ROWS[g.kb_row];
-        int row_len = (int)strlen(row);
+        /* Rows 0..KB_NROWS-1 are the character grid; row KB_NROWS is a control
+         * row (CAPS, 123/ABC, SPACE, DEL). Deliberately NOT on the shoulder
+         * buttons: L1/R1 already belong to the settings screen's tab switching. */
+        const int ctrl_row = KB_NROWS;
+        int row_len = (g.kb_row == ctrl_row) ? 4
+                                             : (int)strlen(KB_ROWS[g.kb_row]);
 
-        /* L1/R1 are free while the keyboard is modal (the settings screen does
-         * not see them): caps-lock, and switching letters <-> digits/symbols. */
-        if (shell_input_button_pressed(s, PLAYOS_BUTTON_L1)) {
-            g.kb_caps = !g.kb_caps;
-        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_R1)) {
-            g.kb_sym = !g.kb_sym;
-            const char *nr = KB_ROWS[g.kb_row];
-            if (g.kb_col >= (int)strlen(nr))
-                g.kb_col = (int)strlen(nr) - 1;
-        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
-            if (g.kb_row > 0)
-                g.kb_row--;
-            else
-                g.kb_row = KB_NROWS - 1;
-            if (g.kb_col >= (int)strlen(KB_ROWS[g.kb_row]))
-                g.kb_col = (int)strlen(KB_ROWS[g.kb_row]) - 1;
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+            g.kb_row = (g.kb_row > 0) ? g.kb_row - 1 : ctrl_row;
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
-            g.kb_row = (g.kb_row + 1) % KB_NROWS;
-            if (g.kb_col >= (int)strlen(KB_ROWS[g.kb_row]))
-                g.kb_col = (int)strlen(KB_ROWS[g.kb_row]) - 1;
+            g.kb_row = (g.kb_row < ctrl_row) ? g.kb_row + 1 : 0;
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
             g.kb_col = (g.kb_col > 0) ? g.kb_col - 1 : row_len - 1;
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT)) {
             g.kb_col = (g.kb_col + 1) % row_len;
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
-            kb_type(row[g.kb_col]);
+            if (g.kb_row == ctrl_row) {
+                switch (g.kb_col) {
+                case 0:  g.kb_caps = !g.kb_caps; break;
+                case 1:  g.kb_sym = !g.kb_sym;   break;
+                case 2:  kb_type(' ');           break;
+                default: kb_delete();            break;
+                }
+            } else {
+                kb_type(KB_ROWS[g.kb_row][g.kb_col]);
+            }
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
             kb_delete();
         } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_WEST)) {
@@ -477,6 +474,14 @@ void screen_network_update(struct playos_shell *s)
                          "Enter a passphrase first");
             }
         }
+
+        /* The row may have changed shape; keep the column inside it. */
+        int cols = (g.kb_row == ctrl_row) ? 4 : (int)strlen(KB_ROWS[g.kb_row]);
+        if (g.kb_col >= cols)
+            g.kb_col = cols - 1;
+        if (g.kb_col < 0)
+            g.kb_col = 0;
+
         return;
     }
 
@@ -533,16 +538,15 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
 {
     char line[160];
 
-    /* The settings screen sizes a row at 30*label_scale, which is ~4x the glyph
-     * height — that left the panel looking empty and its text smaller than the
-     * chrome around it. Work from the font instead: fontSize = scale*7, so a
-     * row of 10*scale has the text filling ~70% of it, and pick a text scale a
-     * touch larger than the tab labels (0.6*header_scale) so content reads
-     * first and chrome second. */
+    /* One text size for the whole panel, taken from the settings screen itself
+     * (value_scale is what every other tab uses for its values) so the Wi-Fi tab
+     * matches the rest of Settings instead of inventing its own scale — the
+     * screens had visibly different type sizes. fontSize = scale*7, so a row of
+     * 12*scale leaves the text filling ~58% of it. */
     float header_scale = (float)s->output_height / 240.0f * s->dpi_scale;
-    float txt = header_scale * 0.7f;
-    float small = txt * 0.78f;
-    float row_h = txt * 10.0f;
+    float txt = value_scale;
+    float small = value_scale;
+    float row_h = txt * 12.0f;
 
     /* Bottom of the scrolled viewport. Mirrors settings_content_bottom() in
      * screen_settings.c: the panel gets the top of the content area (as *y)
@@ -595,17 +599,18 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
         float cell = (((float)s->output_width - 2.0f * x) * 0.94f) / 10.2f;
         float kb_rh = cell * 1.15f;
 
-        float kb_avail = content_bottom - *y - row_h;          /* hint row */
-        if (kb_avail > 0.0f && kb_avail / (float)KB_NROWS < kb_rh)
-            kb_rh = kb_avail / (float)KB_NROWS;
-        if (kb_rh < txt * 4.0f)
-            kb_rh = txt * 4.0f;
+        /* Character rows plus one control row. Two rows are reserved below for
+         * the button hints, so nothing is drawn past the viewport bottom — the
+         * hint line used to be cut off mid-glyph. */
+        const int kb_rows_total = KB_NROWS + 1;
+        float kb_avail = content_bottom - *y - row_h * 2.0f;
+        if (kb_avail > 0.0f && kb_avail / (float)kb_rows_total < kb_rh)
+            kb_rh = kb_avail / (float)kb_rows_total;
+        if (kb_rh < txt * 3.5f)
+            kb_rh = txt * 3.5f;
 
-        /* Glyphs stay at the content text size (a shade larger) and are centred
-         * in their key rather than filling it edge to edge. */
-        float kb_scale = kb_rh * 0.5f / 7.0f;
-        if (kb_scale > txt * 1.15f)
-            kb_scale = txt * 1.15f;
+        /* One text size for the whole panel, as everywhere else in Settings. */
+        float kb_scale = txt;
 
         for (int r = 0; r < KB_NROWS; r++) {
             const char *row = KB_ROWS[r];
@@ -630,16 +635,37 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             *y += kb_rh * 1.12f;
         }
 
-        /* Caps and layout live on the shoulder buttons, so nothing on the grid
-         * itself would show their state. */
-        snprintf(line, sizeof(line), "L1 caps: %s     R1: %s",
-                 g.kb_caps ? "ON" : "off", g.kb_sym ? "123" : "abc");
-        *y += txt * 2.0f;
-        render_draw_text(line, x, *y, small, 0.7f, 0.8f, 0.9f, 1.0f);
-        *y += row_h;
+        /* Control row: CAPS, letters<->digits, SPACE, DEL. On the grid rather
+         * than on a shoulder button, which the settings screen already uses. */
+        {
+            const char *labels[4];
+            labels[0] = g.kb_caps ? "CAPS*" : "caps";
+            labels[1] = g.kb_sym ? "abc" : "123";
+            labels[2] = "SPACE";
+            labels[3] = "DEL";
+
+            float ccell = (((float)s->output_width - 2.0f * x) * 0.94f) / 4.08f;
+            float cx = x;
+
+            for (int c = 0; c < 4; c++) {
+                if (g.kb_row == KB_NROWS && c == g.kb_col)
+                    render_draw_rect(cx, *y, ccell, kb_rh,
+                                     0.20f, 0.45f, 0.85f, 0.85f);
+                else if (c == 0 && g.kb_caps)
+                    render_draw_rect(cx, *y, ccell, kb_rh,
+                                     0.85f, 0.45f, 0.15f, 0.85f);
+
+                render_draw_text(labels[c],
+                                 cx + (ccell - render_text_width(labels[c], kb_scale)) * 0.5f,
+                                 *y + (kb_rh - kb_scale * 7.0f) * 0.5f,
+                                 kb_scale, 0.95f, 0.95f, 0.95f, 1.0f);
+                cx += ccell * 1.02f;
+            }
+            *y += kb_rh * 1.12f;
+        }
 
         *y += txt * 2.0f;
-        render_draw_text("A type   B delete   X cancel   Y connect",
+        render_draw_text("A select   B delete   X cancel   Y connect",
                          x, *y, small, 0.55f, 0.55f, 0.65f, 1.0f);
         *y += row_h;
         return;
@@ -655,10 +681,12 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                          x, *y, txt, 0.8f, 0.8f, 0.8f, 1.0f);
         *y += row_h;
     } else {
-        /* Fit the list into the space actually left: two rows are reserved for
-         * the count line and the control hints, and the rows shrink (but only
-         * to 60% of the standard pitch) so at least four stay visible. */
-        float list_avail = content_bottom - *y - row_h * 2.0f;
+        /* Fit the list into the space actually left. THREE rows are reserved:
+         * the count line, the message line and the button hints — reserving two
+         * drew the hint line below the viewport, where it was cut off mid-glyph.
+         * Rows shrink (but only to 60% of the pitch) so at least four stay
+         * visible. */
+        float list_avail = content_bottom - *y - row_h * 3.0f;
         float rh = row_h;
         if (list_avail > 0.0f && list_avail / 4.0f < rh)
             rh = list_avail / 4.0f;
@@ -672,11 +700,8 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             visible = NET_MAX_AP;
         g.visible = visible;
 
-        /* Text fills ~70% of whatever row height we ended up with, so the SSIDs
-         * are never smaller than the chrome around them (they used to come out
-         * at ~10px against 22px tab labels because the row was scaled down
-         * while the text scale was taken from the settings' own convention). */
-        float rscale = rh / 10.0f;
+        /* One size for the panel's text, same as every other tab. */
+        float rscale = txt;
 
         int last = g.top + visible;
         if (last > g.count)
