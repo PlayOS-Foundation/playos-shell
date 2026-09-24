@@ -55,6 +55,10 @@ static struct {
     int    have_scanned;
     double next_scan;
 
+    /* keyboard state: letters vs digits/symbols, and caps-lock */
+    int    kb_sym;
+    int    kb_caps;
+
     /* link state, polled from NetworkStatus */
     char   state[24];
     char   ssid[NET_SSID_MAX];
@@ -369,13 +373,15 @@ static void disconnect_radio(void)
 
 /* ── passphrase keyboard ──────────────────────────────────────────────── */
 
-static const char *KB_ROWS[] = {
-    "1234567890",
-    "qwertyuiop",
-    "asdfghjkl-",
-    "zxcvbnm_. ",
+/* Two layouts, switched at runtime with R1: letters, and digits/symbols. Both
+ * are three 10-key rows so the cell width is the same in either mode. */
+static const char *const KB_LAYOUTS[2][3] = {
+    { "qwertyuiop", "asdfghjkl-", "zxcvbnm_. " },
+    { "1234567890", "!@#$%^&*()", "-_+=:;,.? " },
 };
-#define KB_NROWS ((int)(sizeof(KB_ROWS) / sizeof(KB_ROWS[0])))
+#define KB_NROWS 3
+/* The active layout; g.kb_sym picks the second one. */
+#define KB_ROWS (KB_LAYOUTS[g.kb_sym])
 
 static void kb_reset(void)
 {
@@ -383,10 +389,16 @@ static void kb_reset(void)
     g.pass[0] = '\0';
     g.kb_row = 0;
     g.kb_col = 0;
+    g.kb_caps = 0;
+    g.kb_sym = 0;
 }
 
 static void kb_type(char c)
 {
+    /* CAPS-LOCK applies to letters, and only in the letters layout. */
+    if (g.kb_caps && !g.kb_sym && c >= 'a' && c <= 'z')
+        c = (char)(c - 'a' + 'A');
+
     if (g.pass_len < NET_PASS_MAX) {
         g.pass[g.pass_len++] = c;
         g.pass[g.pass_len] = '\0';
@@ -424,7 +436,16 @@ void screen_network_update(struct playos_shell *s)
         const char *row = KB_ROWS[g.kb_row];
         int row_len = (int)strlen(row);
 
-        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+        /* L1/R1 are free while the keyboard is modal (the settings screen does
+         * not see them): caps-lock, and switching letters <-> digits/symbols. */
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_L1)) {
+            g.kb_caps = !g.kb_caps;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_R1)) {
+            g.kb_sym = !g.kb_sym;
+            const char *nr = KB_ROWS[g.kb_row];
+            if (g.kb_col >= (int)strlen(nr))
+                g.kb_col = (int)strlen(nr) - 1;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
             if (g.kb_row > 0)
                 g.kb_row--;
             else
@@ -596,6 +617,10 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                                      0.20f, 0.45f, 0.85f, 0.85f);
 
                 char ch[2] = { row[c], '\0' };
+                /* Show what caps-lock will actually type. */
+                if (g.kb_caps && !g.kb_sym && ch[0] >= 'a' && ch[0] <= 'z')
+                    ch[0] = (char)(ch[0] - 'a' + 'A');
+
                 render_draw_text(ch,
                                  cx + (cell - render_text_width(ch, kb_scale)) * 0.5f,
                                  *y + (kb_rh - kb_scale * 7.0f) * 0.5f,
@@ -604,6 +629,14 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
             }
             *y += kb_rh * 1.12f;
         }
+
+        /* Caps and layout live on the shoulder buttons, so nothing on the grid
+         * itself would show their state. */
+        snprintf(line, sizeof(line), "L1 caps: %s     R1: %s",
+                 g.kb_caps ? "ON" : "off", g.kb_sym ? "123" : "abc");
+        *y += txt * 2.0f;
+        render_draw_text(line, x, *y, small, 0.7f, 0.8f, 0.9f, 1.0f);
+        *y += row_h;
 
         *y += txt * 2.0f;
         render_draw_text("A type   B delete   X cancel   Y connect",
@@ -657,28 +690,31 @@ void screen_network_draw(struct playos_shell *s, float x, float *y,
                                  (float)s->output_width - 2.0f * x + 12.0f,
                                  rh, 0.20f, 0.45f, 0.85f, 0.55f);
 
-            render_draw_text(ap->ssid, x, *y, rscale, 1.0f, 1.0f, 1.0f, 1.0f);
-
-            /* Signal bars, drawn right of the SSID column. */
-            float bx = x + 21.0f * txt;
+            /* Signal bars FIRST, then the SSID. Drawn to the right of the text
+             * they landed on top of long names ("MESSA|RITISNIKHOUSE"). */
             int bars = bars_for(ap->dbm);
+            float bar_w = rh * 0.07f;
+            float bar_gap = rh * 0.10f;
             for (int b = 0; b < 4; b++) {
-                float bh = (float)(b + 1) * rh * 0.12f;
-                render_draw_rect(bx + (float)b * rh * 0.09f,
-                                 *y + (rh * 0.55f - bh),
-                                 rh * 0.06f, bh,
+                float bh = (float)(b + 1) * rh * 0.13f;
+                render_draw_rect(x + (float)b * bar_gap,
+                                 *y + (rh * 0.58f - bh),
+                                 bar_w, bh,
                                  b < bars ? 0.45f : 0.35f,
                                  b < bars ? 0.95f : 0.35f,
                                  b < bars ? 0.55f : 0.35f,
                                  b < bars ? 1.0f : 0.5f);
             }
 
-            render_draw_text(ap->security, (float)s->output_width - x - 9.0f * txt,
-                             *y, rscale * 0.9f, 0.6f, 0.8f, 1.0f, 1.0f);
+            render_draw_text(ap->ssid, x + 5.0f * bar_gap, *y, rscale,
+                             1.0f, 1.0f, 1.0f, 1.0f);
 
-            snprintf(line, sizeof(line), "%d", ap->dbm);
-            render_draw_text(line, (float)s->output_width - x - 5.0f * txt,
-                             *y, rscale * 0.9f, 0.55f, 0.55f, 0.65f, 1.0f);
+            /* Security, right-aligned. The dBm number that used to share this
+             * edge overprinted it, and the bars already show the strength. */
+            float sw = render_text_width(ap->security, rscale * 0.9f);
+            render_draw_text(ap->security,
+                             (float)s->output_width - x - sw, *y,
+                             rscale * 0.9f, 0.6f, 0.8f, 1.0f, 1.0f);
 
             *y += rh;
         }
