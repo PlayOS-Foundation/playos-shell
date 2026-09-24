@@ -417,6 +417,10 @@ screen_settings_enter(struct playos_shell *s)
     s->settings_power_cursor = 0;
     s->power_confirm = false;
     s->update_restart_confirm = false;
+
+    /* Kick off the Wi-Fi scan as Settings opens, so the Network tab already
+     * has a list by the time the user pages to it. */
+    screen_network_enter(s);
     s->install_payload_present = settings_install_payload_present(s);
     if (s->install_payload_present)
         shell_set_toast(s, "Install PlayOS available (System tab, scroll down)");
@@ -490,6 +494,15 @@ screen_settings_update(struct playos_shell *s)
     /* Reset vertical scroll whenever the tab changes. */
     if (s->settings_tab != prev_tab)
         s->settings_content_scroll = 0.0f;
+
+    /* Wi-Fi tab: the panel takes the d-pad and the face buttons, but only
+     * swallows them while its passphrase keyboard is up — otherwise B keeps
+     * meaning "back" and L1/R1 keep switching tabs. */
+    if (s->settings_tab == TAB_NETWORK) {
+        screen_network_update(s);
+        if (screen_network_keyboard_open())
+            return;
+    }
 
     /* D-pad U/D: vertical navigation / scrolling. */
     if (s->settings_tab == TAB_SYSTEM) {
@@ -1363,15 +1376,8 @@ screen_settings_draw(struct playos_shell *s)
         }
         break;
 
-    case TAB_NETWORK: /* Network */
-        draw_info_line(s, "Status", "Not Connected",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Wi-Fi", "Disabled",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "Bluetooth", "Disabled",
-                       content_x, &content_y, label_scale, value_scale);
-        draw_info_line(s, "IP Address", "-",
-                       content_x, &content_y, label_scale, value_scale);
+    case TAB_NETWORK: /* Network - live Wi-Fi panel (Sprint 16, T6) */
+        screen_network_draw(s, content_x, &content_y, label_scale, value_scale);
         break;
 
     case TAB_INPUT: /* Input */

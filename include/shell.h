@@ -249,6 +249,15 @@ void screen_settings_enter(struct playos_shell *s);
 void screen_settings_update(struct playos_shell *s);
 void screen_settings_draw(struct playos_shell *s);
 
+/* Wi-Fi panel, drawn inside Settings → Network (Sprint 16, T6). */
+void screen_network_enter(struct playos_shell *s);
+void screen_network_update(struct playos_shell *s);
+void screen_network_draw(struct playos_shell *s, float x, float *y,
+                         float label_scale, float value_scale);
+/* True while the passphrase keyboard is up: it is modal, so the settings
+ * screen must not also act on the face buttons. */
+int  screen_network_keyboard_open(void);
+
 /* S14 P4: true when the visible settings tab must render at full rate
  * (the Live Input Test diagnostic). */
 bool screen_settings_wants_full_rate(const struct playos_shell *s);

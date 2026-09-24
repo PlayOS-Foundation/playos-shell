@@ -1,0 +1,612 @@
+/**
+ * screen_network.c — Wi-Fi panel for the Settings screen (Sprint 16, T6)
+ *
+ * Lives inside Settings → Network. Shows the radio's state, the scan list with
+ * signal + security, and a passphrase entry via an on-screen keyboard.
+ *
+ * Every action goes over the trusted control socket:
+ *   shell → control.sock → playos-init → playos-net → wpa_supplicant
+ * The shell never talks to wpa_supplicant, and never opens the bridge socket.
+ *
+ * Scanning is the one slow request (seconds, and the control protocol is
+ * synchronous), so it runs in a forked child and the reply arrives through a
+ * pipe — the UI keeps drawing "Scanning…" instead of freezing for ~3s.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+#include "shell.h"
+#include "playos/playos_logging.h"
+#include "playos/playos_input.h"
+
+#ifdef PLAYOS_TRUSTED_IPC
+#include "playos-runtime/trusted_control.h"
+#endif
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+#define NET_MAX_AP    32
+#define NET_SSID_MAX  64
+#define NET_PASS_MAX  63
+#define NET_JSON_MAX  16384
+#define NET_RESCAN_S  20.0      /* idle refresh */
+#define NET_STATUS_S  3.0       /* link-state poll */
+#define NET_VISIBLE   8         /* rows shown at once */
+
+typedef struct {
+    char ssid[NET_SSID_MAX];
+    char security[16];
+    int  dbm;
+} net_ap;
+
+static struct {
+    net_ap ap[NET_MAX_AP];
+    int    count;
+    int    cursor;
+    int    top;                 /* first visible row */
+
+    int    scanning;
+    int    have_scanned;
+    double next_scan;
+
+    /* link state, polled from NetworkStatus */
+    char   state[24];
+    char   ssid[NET_SSID_MAX];
+    char   ip[64];
+    double next_status;
+
+    /* passphrase keyboard */
+    int    kb_open;
+    char   pass[NET_PASS_MAX + 1];
+    int    pass_len;
+    int    kb_row;
+    int    kb_col;
+
+    char   message[96];
+} g;
+
+/* ── small helpers ────────────────────────────────────────────────────── */
+
+static double now_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Copy "key":"value" out of a flat JSON object. */
+static int json_str(const char *json, const char *key, char *out, size_t out_sz)
+{
+    char pat[64];
+    snprintf(pat, sizeof(pat), "\"%s\":\"", key);
+
+    const char *p = strstr(json, pat);
+    if (!p)
+        return -1;
+    p += strlen(pat);
+
+    size_t j = 0;
+    while (*p && *p != '"' && j + 1 < out_sz) {
+        if (*p == '\\' && p[1])
+            p++;
+        out[j++] = *p++;
+    }
+    out[j] = '\0';
+    return 0;
+}
+
+static int json_int(const char *json, const char *key, int *out)
+{
+    char pat[64];
+    snprintf(pat, sizeof(pat), "\"%s\":", key);
+
+    const char *p = strstr(json, pat);
+    if (!p)
+        return -1;
+    *out = atoi(p + strlen(pat));
+    return 0;
+}
+
+/* Parse {"v":1,"type":"ScanResults","networks":[{...},...]}. */
+static void parse_networks(const char *json)
+{
+    int n = 0;
+    const char *p = strstr(json, "\"networks\"");
+    if (!p)
+        return;
+
+    p = strchr(p, '[');
+    if (!p)
+        return;
+    p++;
+
+    while (*p && n < NET_MAX_AP) {
+        if (*p == ']')
+            break;
+        if (*p != '{') {
+            p++;
+            continue;
+        }
+
+        const char *end = strchr(p, '}');
+        if (!end)
+            break;
+
+        char obj[256];
+        size_t len = (size_t)(end - p) + 1;
+        if (len >= sizeof(obj))
+            len = sizeof(obj) - 1;
+        memcpy(obj, p, len);
+        obj[len] = '\0';
+
+        char ssid[NET_SSID_MAX] = {0};
+        char sec[16] = {0};
+        int dbm = 0;
+
+        json_str(obj, "ssid", ssid, sizeof(ssid));
+        json_str(obj, "security", sec, sizeof(sec));
+        json_int(obj, "signal_dbm", &dbm);
+
+        if (ssid[0]) {
+            snprintf(g.ap[n].ssid, sizeof(g.ap[n].ssid), "%s", ssid);
+            snprintf(g.ap[n].security, sizeof(g.ap[n].security), "%s",
+                     sec[0] ? sec : "open");
+            g.ap[n].dbm = dbm;
+            n++;
+        }
+
+        p = end + 1;
+    }
+
+    g.count = n;
+    if (g.cursor >= g.count)
+        g.cursor = g.count > 0 ? g.count - 1 : 0;
+    if (g.top > g.cursor)
+        g.top = g.cursor;
+}
+
+/* ── requests (control.sock, via init's relay) ────────────────────────── */
+
+static pid_t g_scan_pid = -1;
+static int   g_scan_fd = -1;
+static char  g_scan_buf[NET_JSON_MAX];
+static size_t g_scan_len;
+
+static void scan_start(void)
+{
+    if (g.scanning || g_scan_pid > 0)
+        return;
+
+    g_scan_buf[0] = '\0';
+    g_scan_len = 0;
+
+    int pfd[2];
+    if (pipe(pfd) != 0)
+        return;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        return;
+    }
+
+    if (pid == 0) {
+        /* Child: only the request, then the JSON to the parent. */
+        close(pfd[0]);
+#ifdef PLAYOS_TRUSTED_IPC
+        char *buf = malloc(NET_JSON_MAX);
+        if (buf) {
+            int n = playos_trusted_scan_networks(-1, buf, NET_JSON_MAX);
+            if (n > 0) {
+                ssize_t w = write(pfd[1], buf, (size_t)n);
+                (void)w;
+            }
+            free(buf);
+        }
+#else
+        (void)pfd;
+#endif
+        _exit(0);
+    }
+
+    close(pfd[1]);
+    g_scan_fd = pfd[0];
+    fcntl(g_scan_fd, F_SETFL, O_NONBLOCK);
+    g_scan_pid = pid;
+    g.scanning = 1;
+}
+
+/* Non-blocking: collect the child's JSON, then reap it. */
+static void scan_poll(void)
+{
+    if (g_scan_pid <= 0)
+        return;
+
+    for (;;) {
+        char tmp[1024];
+        ssize_t n = read(g_scan_fd, tmp, sizeof(tmp));
+
+        if (n > 0) {
+            if (g_scan_len + (size_t)n < sizeof(g_scan_buf)) {
+                memcpy(g_scan_buf + g_scan_len, tmp, (size_t)n);
+                g_scan_len += (size_t)n;
+                g_scan_buf[g_scan_len] = '\0';
+            }
+            continue;
+        }
+
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return;                     /* still running */
+        break;                          /* EOF or error */
+    }
+
+    int status = 0;
+    waitpid(g_scan_pid, &status, 0);
+    close(g_scan_fd);
+    g_scan_fd = -1;
+    g_scan_pid = -1;
+    g.scanning = 0;
+    g.next_scan = now_s() + NET_RESCAN_S;
+
+    if (g_scan_len > 0) {
+        parse_networks(g_scan_buf);
+        g.have_scanned = 1;
+        PLAYOS_LOG_I("net", "scan: %d network(s)", g.count);
+    } else {
+        snprintf(g.message, sizeof(g.message),
+                 "Scan failed - is Wi-Fi up?");
+    }
+}
+
+/* Fast requests: safe to run inline. */
+static void status_poll(void)
+{
+    g.next_status = now_s() + NET_STATUS_S;
+
+#ifdef PLAYOS_TRUSTED_IPC
+    static char buf[1024];
+    if (playos_trusted_network_status(-1, buf, sizeof(buf)) <= 0)
+        return;
+
+    char st[24] = {0}, ssid[NET_SSID_MAX] = {0}, ip[64] = {0};
+    json_str(buf, "state", st, sizeof(st));
+    json_str(buf, "ssid", ssid, sizeof(ssid));
+    json_str(buf, "ip", ip, sizeof(ip));
+
+    if (st[0])
+        snprintf(g.state, sizeof(g.state), "%s", st);
+    snprintf(g.ssid, sizeof(g.ssid), "%s", ssid);
+    snprintf(g.ip, sizeof(g.ip), "%s", ip);
+#endif
+}
+
+static void connect_to(const net_ap *ap, const char *psk)
+{
+    snprintf(g.message, sizeof(g.message), "Connecting to %.40s...", ap->ssid);
+
+#ifdef PLAYOS_TRUSTED_IPC
+    static char buf[1024];
+    int n = playos_trusted_connect_network(-1, ap->ssid, psk, ap->security,
+                                           buf, sizeof(buf));
+    if (n <= 0) {
+        snprintf(g.message, sizeof(g.message), "Connect request failed");
+        return;
+    }
+
+    if (strstr(buf, "ConnectNetworkError")) {
+        char reason[48] = {0};
+        json_str(buf, "reason", reason, sizeof(reason));
+        snprintf(g.message, sizeof(g.message), "Failed: %s",
+                 reason[0] ? reason : "unknown");
+        PLAYOS_LOG_W("net", "connect '%.40s' refused: %s", ap->ssid,
+                     reason[0] ? reason : "unknown");
+        return;
+    }
+
+    PLAYOS_LOG_I("shell", "net: connecting to '%.40s' (%s)", ap->ssid,
+                 ap->security);
+    g.next_status = 0.0;        /* refresh the state line immediately */
+#endif
+}
+
+static void disconnect_radio(void)
+{
+#ifdef PLAYOS_TRUSTED_IPC
+    static char buf[512];
+    playos_trusted_disconnect_network(-1, buf, sizeof(buf));
+    snprintf(g.message, sizeof(g.message), "Disconnected");
+    g.next_status = 0.0;
+#endif
+}
+
+/* ── passphrase keyboard ──────────────────────────────────────────────── */
+
+static const char *KB_ROWS[] = {
+    "1234567890",
+    "qwertyuiop",
+    "asdfghjkl-",
+    "zxcvbnm_. ",
+};
+#define KB_NROWS ((int)(sizeof(KB_ROWS) / sizeof(KB_ROWS[0])))
+
+static void kb_reset(void)
+{
+    g.pass_len = 0;
+    g.pass[0] = '\0';
+    g.kb_row = 0;
+    g.kb_col = 0;
+}
+
+static void kb_type(char c)
+{
+    if (g.pass_len < NET_PASS_MAX) {
+        g.pass[g.pass_len++] = c;
+        g.pass[g.pass_len] = '\0';
+    }
+}
+
+static void kb_delete(void)
+{
+    if (g.pass_len > 0)
+        g.pass[--g.pass_len] = '\0';
+}
+
+/* ── public API ───────────────────────────────────────────────────────── */
+
+void screen_network_enter(struct playos_shell *s)
+{
+    (void)s;
+
+    memset(&g, 0, sizeof(g));
+    snprintf(g.state, sizeof(g.state), "off");
+    scan_start();
+}
+
+void screen_network_update(struct playos_shell *s)
+{
+    scan_poll();
+
+    if (now_s() >= g.next_status)
+        status_poll();
+
+    if (!g.scanning && now_s() >= g.next_scan)
+        scan_start();
+
+    if (g.kb_open) {
+        const char *row = KB_ROWS[g.kb_row];
+        int row_len = (int)strlen(row);
+
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+            if (g.kb_row > 0)
+                g.kb_row--;
+            else
+                g.kb_row = KB_NROWS - 1;
+            if (g.kb_col >= (int)strlen(KB_ROWS[g.kb_row]))
+                g.kb_col = (int)strlen(KB_ROWS[g.kb_row]) - 1;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
+            g.kb_row = (g.kb_row + 1) % KB_NROWS;
+            if (g.kb_col >= (int)strlen(KB_ROWS[g.kb_row]))
+                g.kb_col = (int)strlen(KB_ROWS[g.kb_row]) - 1;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT)) {
+            g.kb_col = (g.kb_col > 0) ? g.kb_col - 1 : row_len - 1;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT)) {
+            g.kb_col = (g.kb_col + 1) % row_len;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            kb_type(row[g.kb_col]);
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST)) {
+            kb_delete();
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_WEST)) {
+            g.kb_open = 0;
+            snprintf(g.message, sizeof(g.message), "Cancelled");
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_NORTH) ||
+                   shell_input_button_pressed(s, PLAYOS_BUTTON_START)) {
+            if (g.pass_len > 0 && g.count > 0) {
+                g.kb_open = 0;
+                connect_to(&g.ap[g.cursor], g.pass);
+            } else {
+                snprintf(g.message, sizeof(g.message),
+                         "Enter a passphrase first");
+            }
+        }
+        return;
+    }
+
+    /* List navigation. */
+    if (g.count > 0) {
+        if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP)) {
+            if (g.cursor > 0)
+                g.cursor--;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN)) {
+            if (g.cursor + 1 < g.count)
+                g.cursor++;
+        } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH)) {
+            const net_ap *ap = &g.ap[g.cursor];
+            if (strcmp(ap->security, "open") == 0) {
+                connect_to(ap, "");
+            } else {
+                kb_reset();
+                g.kb_open = 1;
+                snprintf(g.message, sizeof(g.message),
+                         "Passphrase for %.40s", ap->ssid);
+            }
+        }
+    }
+
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_NORTH)) {
+        if (!g.scanning) {
+            snprintf(g.message, sizeof(g.message), "Scanning...");
+            scan_start();
+        }
+    } else if (shell_input_button_pressed(s, PLAYOS_BUTTON_WEST)) {
+        disconnect_radio();
+    }
+
+    /* Keep the cursor inside the visible window. */
+    if (g.cursor < g.top)
+        g.top = g.cursor;
+    if (g.cursor >= g.top + NET_VISIBLE)
+        g.top = g.cursor - NET_VISIBLE + 1;
+}
+
+/* Signal strength → 0..4 bars. */
+static int bars_for(int dbm)
+{
+    if (dbm >= -55) return 4;
+    if (dbm >= -65) return 3;
+    if (dbm >= -75) return 2;
+    if (dbm >= -85) return 1;
+    return 0;
+}
+
+void screen_network_draw(struct playos_shell *s, float x, float *y,
+                         float label_scale, float value_scale)
+{
+    char line[160];
+    float row_h = 30.0f * label_scale;
+
+    /* ── Link state ────────────────────────────────────────────────── */
+    const char *state_txt = g.state[0] ? g.state : "off";
+    if (strcmp(state_txt, "connected") == 0 && g.ssid[0])
+        snprintf(line, sizeof(line), "Connected - %s", g.ssid);
+    else if (strcmp(state_txt, "connecting") == 0)
+        snprintf(line, sizeof(line), "Connecting...");
+    else
+        snprintf(line, sizeof(line), "Not connected");
+
+    render_draw_text("Wi-Fi", x, *y, label_scale, 0.6f, 0.6f, 0.7f, 1.0f);
+    render_draw_text(line,
+                     (float)s->output_width - x -
+                         render_text_width(line, value_scale),
+                     *y, value_scale, 0.9f, 0.9f, 0.9f, 1.0f);
+    *y += row_h;
+
+    if (g.ip[0]) {
+        render_draw_text("IP", x, *y, label_scale, 0.6f, 0.6f, 0.7f, 1.0f);
+        render_draw_text(g.ip,
+                         (float)s->output_width - x -
+                             render_text_width(g.ip, value_scale),
+                         *y, value_scale, 0.9f, 0.9f, 0.9f, 1.0f);
+        *y += row_h;
+    }
+    *y += 6.0f * label_scale;
+
+    /* ── Passphrase entry ──────────────────────────────────────────── */
+    if (g.kb_open) {
+        char masked[NET_PASS_MAX + 1];
+        for (int i = 0; i < g.pass_len; i++)
+            masked[i] = '*';
+        masked[g.pass_len] = '\0';
+
+        render_draw_text("Passphrase", x, *y, label_scale,
+                         0.6f, 0.6f, 0.7f, 1.0f);
+        render_draw_text(masked, x + 150.0f * label_scale, *y, value_scale,
+                         0.95f, 0.95f, 0.6f, 1.0f);
+        *y += row_h * 1.4f;
+
+        float cell = 24.0f * label_scale;
+        for (int r = 0; r < KB_NROWS; r++) {
+            const char *row = KB_ROWS[r];
+            float cx = x + 8.0f * label_scale;
+
+            for (int c = 0; row[c]; c++) {
+                if (r == g.kb_row && c == g.kb_col) {
+                    render_draw_rect(cx - 3.0f * label_scale, *y - 2.0f,
+                                     cell, row_h, 0.20f, 0.45f, 0.85f, 0.85f);
+                }
+                char ch[2] = { row[c], '\0' };
+                render_draw_text(ch, cx, *y, value_scale,
+                                 0.95f, 0.95f, 0.95f, 1.0f);
+                cx += cell;
+            }
+            *y += row_h * 1.1f;
+        }
+
+        *y += 4.0f * label_scale;
+        render_draw_text("A type   B delete   X cancel   Y connect",
+                         x, *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+        *y += row_h;
+        return;
+    }
+
+    /* ── Scan list ─────────────────────────────────────────────────── */
+    if (g.scanning && !g.have_scanned) {
+        render_draw_text("Scanning...", x, *y, value_scale,
+                         0.8f, 0.8f, 0.8f, 1.0f);
+        *y += row_h;
+    } else if (g.count == 0) {
+        render_draw_text(g.have_scanned ? "No networks found"
+                                        : "Press Y to scan",
+                         x, *y, value_scale, 0.8f, 0.8f, 0.8f, 1.0f);
+        *y += row_h;
+    } else {
+        int last = g.top + NET_VISIBLE;
+        if (last > g.count)
+            last = g.count;
+
+        for (int i = g.top; i < last; i++) {
+            const net_ap *ap = &g.ap[i];
+
+            if (i == g.cursor)
+                render_draw_rect(x - 6.0f, *y - 3.0f,
+                                 (float)s->output_width - 2.0f * x + 12.0f,
+                                 row_h, 0.20f, 0.45f, 0.85f, 0.55f);
+
+            render_draw_text(ap->ssid, x, *y, value_scale, 1.0f, 1.0f, 1.0f, 1.0f);
+
+            /* Signal bars, drawn right of the SSID column. */
+            float bx = x + 300.0f * label_scale;
+            int bars = bars_for(ap->dbm);
+            for (int b = 0; b < 4; b++) {
+                float bh = (float)(b + 1) * 3.0f * label_scale;
+                render_draw_rect(bx + (float)b * 6.0f * label_scale,
+                                 *y + (12.0f * label_scale - bh),
+                                 4.0f * label_scale, bh,
+                                 b < bars ? 0.45f : 0.35f,
+                                 b < bars ? 0.95f : 0.35f,
+                                 b < bars ? 0.55f : 0.35f,
+                                 b < bars ? 1.0f : 0.5f);
+            }
+
+            render_draw_text(ap->security, (float)s->output_width - x - 90.0f,
+                             *y, label_scale, 0.6f, 0.8f, 1.0f, 1.0f);
+
+            snprintf(line, sizeof(line), "%d", ap->dbm);
+            render_draw_text(line, (float)s->output_width - x - 40.0f,
+                             *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+
+            *y += row_h;
+        }
+
+        if (g.count > NET_VISIBLE)
+            snprintf(line, sizeof(line), "%d of %d networks", g.cursor + 1,
+                     g.count);
+        else
+            snprintf(line, sizeof(line), "%d networks", g.count);
+        *y += 4.0f * label_scale;
+        render_draw_text(line, x, *y, label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+        *y += row_h;
+    }
+
+    /* ── Message + controls ────────────────────────────────────────── */
+    if (g.message[0]) {
+        render_draw_text(g.message, x, *y, label_scale,
+                         0.95f, 0.85f, 0.45f, 1.0f);
+        *y += row_h;
+    }
+
+    render_draw_text("A connect   Y rescan   X disconnect", x, *y,
+                     label_scale, 0.55f, 0.55f, 0.65f, 1.0f);
+    *y += row_h;
+}
+
+int screen_network_keyboard_open(void)
+{
+    return g.kb_open;
+}
