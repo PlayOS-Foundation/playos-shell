@@ -639,6 +639,48 @@ static void PlayOSPollGamepad(void)
 // Register all input events
 // NOTE: PlayOS keyboard/mouse input is owned by src/input.c (direct evdev);
 //       gamepad input is translated from the platform input API above.
+//----------------------------------------------------------------------------------
+// Touch: mirrors the controller path above. libplayos reads the panel from evdev
+// in this process, so there is no compositor or Wayland involvement (ADR-0013).
+// Points arrive normalised 0..1 and are scaled into raylib's screen space.
+//----------------------------------------------------------------------------------
+static void PlayOSPollTouch(void)
+{
+    static int supported = -1;
+    PlayOSTouchPoint points[PLAYOS_TOUCH_POINT_MAX];
+    int count;
+
+    if (supported < 0) supported = playos_input_touch_supported();
+
+    if (supported != 1)
+    {
+        CORE.Input.Touch.pointCount = 0;
+        return;
+    }
+
+    count = playos_input_get_touch_state(points, PLAYOS_TOUCH_POINT_MAX);
+    if (count < 0) count = 0;
+    if (count > MAX_TOUCH_POINTS) count = MAX_TOUCH_POINTS;
+
+    for (int i = 0; i < count; i++)
+    {
+        CORE.Input.Touch.position[i].x = points[i].x*(float)GetScreenWidth();
+        CORE.Input.Touch.position[i].y = points[i].y*(float)GetScreenHeight();
+        CORE.Input.Touch.pointId[i] = points[i].id;
+        CORE.Input.Touch.currentTouchState[i] = 1;
+    }
+
+    // Points beyond the current count must be cleared, or a finger that lifted
+    // stays "down" forever and IsGestureDetected() never fires again.
+    for (int i = count; i < MAX_TOUCH_POINTS; i++)
+    {
+        CORE.Input.Touch.currentTouchState[i] = 0;
+        CORE.Input.Touch.pointId[i] = 0;
+    }
+
+    CORE.Input.Touch.pointCount = count;
+}
+
 void PollInputEvents(void)
 {
 #if SUPPORT_GESTURES_SYSTEM
@@ -656,6 +698,9 @@ void PollInputEvents(void)
 
     // Refresh raylib's gamepad state from the PlayOS controller snapshot.
     PlayOSPollGamepad();
+
+    // Refresh raylib's touch state from the PlayOS panel snapshot.
+    PlayOSPollTouch();
 
     // Register previous touch states
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
