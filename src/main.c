@@ -28,6 +28,7 @@
 
 #include "raylib.h"
 #include "shell.h"
+#include "lvgl_spike.h"
 #include "playos-v1-client-protocol.h"
 #include "playos/playos_system.h"
 #include "playos/playos_logging.h"
@@ -837,6 +838,13 @@ main(int argc, char *argv[])
     int    frame_count = 0;
     struct timespec last_fps_time = s->start_time;
 
+    /* Sprint 22: LVGL spike (Path 1). Inert unless compiled in and
+
+     * PLAYOS_SHELL_LVGL_SPIKE=1 is set; draws its own screen over the shell. */
+
+    playos_lvgl_spike_init(s->output_width, s->output_height);
+
+
     while (s->running && !WindowShouldClose()) {
         struct timespec frame_start;
         clock_gettime(CLOCK_MONOTONIC, &frame_start);
@@ -1114,6 +1122,8 @@ main(int argc, char *argv[])
 
             if (s->elapsed_time < s->toast_until)
                 shell_toast_draw(s);
+
+            playos_lvgl_spike_frame(GetFrameTime());
 
             render_end_frame(s);   /* EndDrawing() + swap via backend */
             frame_count++;

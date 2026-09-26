@@ -22,8 +22,7 @@
 #include <raylib.h>
 #include <stdlib.h>
 
-#define SPIKE_W 1280
-#define SPIKE_H 720
+static int g_w, g_h;   /* the shell's output size */
 
 static Texture2D     g_tex;
 static lv_display_t *g_disp;
@@ -39,7 +38,7 @@ playos_lvgl_spike_enabled(void)
 
         g_state = (v && v[0] == '1') ? 1 : 0;
         if (g_state)
-            TraceLog(LOG_INFO, "LVGL: spike enabled (%dx%d, Path 1)", SPIKE_W, SPIKE_H);
+            TraceLog(LOG_INFO, "LVGL: spike enabled, Path 1");
     }
     return g_state;
 }
@@ -117,33 +116,35 @@ build_screen(void)
 }
 
 void
-playos_lvgl_spike_init(void)
+playos_lvgl_spike_init(int width, int height)
 {
     if (!playos_lvgl_spike_enabled())
         return;
 
+    g_w = width;
+    g_h = height;
+
     lv_init();
 
-    Image img = GenImageColor(SPIKE_W, SPIKE_H, BLACK);
+    Image img = GenImageColor(g_w, g_h, BLACK);
 
     g_tex = LoadTextureFromImage(img);
     UnloadImage(img);
     SetTextureFilter(g_tex, TEXTURE_FILTER_POINT);
 
-    g_buf = (uint8_t *)MemAlloc((size_t)SPIKE_W * SPIKE_H * 3);
+    g_buf = (uint8_t *)MemAlloc((size_t)g_w * g_h * 3);
 
-    g_disp = lv_display_create(SPIKE_W, SPIKE_H);
+    g_disp = lv_display_create(g_w, g_h);
     lv_display_set_color_format(g_disp, LV_COLOR_FORMAT_RGB888);
     /* Whole-frame rendering first: correctness before the partial-upload budget
      * (Sprint 22 T2/T4 ordering). */
-    lv_display_set_buffers(g_disp, g_buf, NULL, SPIKE_W * SPIKE_H * 3,
+    lv_display_set_buffers(g_disp, g_buf, NULL, g_w * g_h * 3,
                            LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(g_disp, flush_cb);
 
     build_screen();
 
-    TraceLog(LOG_INFO, "LVGL: display %dx%d, RGB888, whole-frame render",
-             SPIKE_W, SPIKE_H);
+    TraceLog(LOG_INFO, "LVGL: display %dx%d, RGB888, whole-frame render", g_w, g_h);
 }
 
 void
@@ -162,14 +163,14 @@ playos_lvgl_spike_frame(float dt_seconds)
     /* Drawn by raylib, on top of LVGL's output: one frame, two layers. */
     DrawText(TextFormat("LVGL frames %d  (%.1f fps)", g_frames,
                         dt_seconds > 0.0f ? 1.0f / dt_seconds : 0.0f),
-             20, SPIKE_H - 34, 20, RAYWHITE);
+             20, g_h - 34, 20, RAYWHITE);
 }
 
 #else  /* !PLAYOS_SHELL_EXPERIMENTAL_LVGL */
 
 /* Built into every shell; inert unless the spike is compiled in. */
 int  playos_lvgl_spike_enabled(void) { return 0; }
-void playos_lvgl_spike_init(void)    { }
+void playos_lvgl_spike_init(int width, int height) { (void)width; (void)height; }
 void playos_lvgl_spike_frame(float dt_seconds) { (void)dt_seconds; }
 
 #endif /* PLAYOS_SHELL_EXPERIMENTAL_LVGL */
