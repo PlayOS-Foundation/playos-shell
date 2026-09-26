@@ -120,23 +120,20 @@ add_subdirectory(external/raylib)
 
 # ── LVGL UI spike (Sprint 22) ─────────────────────────────────────────────────
 # LVGL is a widget layer *on top of* raylib, not a second rendering backend: it
-# draws into a raylib-managed texture through its flush_cb. ADR-0006 therefore
-# still holds. Off by default, and the whole spike is additive and reversible.
+# draws into a raylib-managed texture through its flush_cb, so ADR-0006 holds.
+# It now comes from the playos-lvgl package rather than being built in-tree, so
+# the overlay links the same copy once the OSK moves there.
 option(PLAYOS_SHELL_EXPERIMENTAL_LVGL "Build the LVGL UI spike (Sprint 22)" OFF)
 if(PLAYOS_SHELL_EXPERIMENTAL_LVGL)
-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/lvgl/lvgl.h")
-        message(FATAL_ERROR "PLAYOS_SHELL_EXPERIMENTAL_LVGL=ON but external/lvgl is missing "
-                            "(vendor LVGL v9.5.0 into playos-shell/external/lvgl)")
+    find_library(LVGL_LIB lvgl HINTS ${CMAKE_SYSROOT}/usr/lib ${CMAKE_PREFIX_PATH}/lib)
+    if(NOT LVGL_LIB)
+        message(FATAL_ERROR "playos-lvgl not found: enable BR2_PACKAGE_PLAYOS_LVGL")
     endif()
-    set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/lvgl/lv_conf.h" CACHE STRING "" FORCE)
-    # LVGL must be linked statically into the shell. Built shared it becomes a
-    # runtime dependency the image does not install, and the shell dies at the
-    # dynamic loader with 'lv_*: symbol not found' - leaving no shell at all.
-    set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
-    set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory(external/lvgl)
-    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
-    message(STATUS "playos-shell: LVGL spike ENABLED (Sprint 22, Path 1)")
+    get_filename_component(LVGL_LIB_DIR "${LVGL_LIB}" DIRECTORY)
+    find_path(LVGL_INCLUDE_DIR lvgl.h
+        HINTS "${LVGL_LIB_DIR}/../include" "${CMAKE_PREFIX_PATH}/include"
+        REQUIRED)
+    message(STATUS "playos-shell: LVGL spike ENABLED (Sprint 22, Path 1) via ${LVGL_LIB}")
 endif()
 
 
@@ -210,7 +207,8 @@ target_link_libraries(playos-shell PRIVATE
     m
 )
 if(PLAYOS_SHELL_EXPERIMENTAL_LVGL)
-    target_link_libraries(playos-shell PRIVATE lvgl)
+    target_link_libraries(playos-shell PRIVATE ${LVGL_LIB})
+    target_include_directories(playos-shell PRIVATE ${LVGL_INCLUDE_DIR})
     target_compile_definitions(playos-shell PRIVATE PLAYOS_SHELL_EXPERIMENTAL_LVGL=1)
 endif()
 
