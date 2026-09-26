@@ -118,6 +118,22 @@ set(OPENGL_VERSION "ES 3.0" CACHE STRING "raylib OpenGL version" FORCE)
 
 add_subdirectory(external/raylib)
 
+# ── LVGL UI spike (Sprint 22) ─────────────────────────────────────────────────
+# LVGL is a widget layer *on top of* raylib, not a second rendering backend: it
+# draws into a raylib-managed texture through its flush_cb. ADR-0006 therefore
+# still holds. Off by default, and the whole spike is additive and reversible.
+option(PLAYOS_SHELL_EXPERIMENTAL_LVGL "Build the LVGL UI spike (Sprint 22)" OFF)
+if(PLAYOS_SHELL_EXPERIMENTAL_LVGL)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/lvgl/lvgl.h")
+        message(FATAL_ERROR "PLAYOS_SHELL_EXPERIMENTAL_LVGL=ON but external/lvgl is missing "
+                            "(vendor LVGL v9.5.0 into playos-shell/external/lvgl)")
+    endif()
+    set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/lvgl/lv_conf.h" CACHE STRING "" FORCE)
+    add_subdirectory(external/lvgl)
+    message(STATUS "playos-shell: LVGL spike ENABLED (Sprint 22, Path 1)")
+endif()
+
+
 # rcore_playos.c is compiled into raylib and owns the Wayland/EGL
 # protocol usage, so the generated protocol bindings belong to raylib.
 target_include_directories(raylib PRIVATE ${GEN_DIR})
@@ -186,6 +202,10 @@ target_link_libraries(playos-shell PRIVATE
     ${PLAYOS_LIB}
     m
 )
+if(PLAYOS_SHELL_EXPERIMENTAL_LVGL)
+    target_link_libraries(playos-shell PRIVATE lvgl)
+    target_compile_definitions(playos-shell PRIVATE PLAYOS_SHELL_EXPERIMENTAL_LVGL=1)
+endif()
 
 target_link_libraries(playos-shell PRIVATE ${RAYLIB_LIB})
 
