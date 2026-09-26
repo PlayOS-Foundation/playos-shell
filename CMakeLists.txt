@@ -153,6 +153,7 @@ set(RAYLIB_LIB raylib)
 # ── Shell source files ─────────────────────────────────────────────────
 set(SHELL_SOURCES
     src/main.c
+    src/lvgl_spike.c
     src/input.c
     src/gamepad_db.c
     src/screen_home.c
