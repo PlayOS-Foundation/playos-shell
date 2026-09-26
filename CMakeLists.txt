@@ -129,7 +129,13 @@ if(PLAYOS_SHELL_EXPERIMENTAL_LVGL)
                             "(vendor LVGL v9.5.0 into playos-shell/external/lvgl)")
     endif()
     set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/lvgl/lv_conf.h" CACHE STRING "" FORCE)
+    # LVGL must be linked statically into the shell. Built shared it becomes a
+    # runtime dependency the image does not install, and the shell dies at the
+    # dynamic loader with 'lv_*: symbol not found' - leaving no shell at all.
+    set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
     add_subdirectory(external/lvgl)
+    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
     message(STATUS "playos-shell: LVGL spike ENABLED (Sprint 22, Path 1)")
 endif()
 

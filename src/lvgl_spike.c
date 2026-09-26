@@ -20,6 +20,7 @@
 
 #include <lvgl.h>
 #include <raylib.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "shell.h"   /* the shell's controller state, for the LVGL indev */
@@ -40,8 +41,15 @@ playos_lvgl_spike_enabled(void)
 {
     if (g_state < 0) {
         const char *v = getenv("PLAYOS_SHELL_LVGL_SPIKE");
+        /* A marker file as well as the environment variable: init starts the shell
+         * itself, so a variable is awkward to set, while a file under /data
+         * survives restarts and is trivial to add or remove. */
+        int marker = 0;
+        FILE *f = fopen("/data/config/lvgl-spike", "r");
 
-        g_state = (v && v[0] == '1') ? 1 : 0;
+        if (f) { marker = 1; fclose(f); }
+
+        g_state = ((v && v[0] == '1') || marker) ? 1 : 0;
         if (g_state)
             TraceLog(LOG_INFO, "LVGL: spike enabled, Path 1");
     }
