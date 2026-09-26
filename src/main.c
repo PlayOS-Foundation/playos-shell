@@ -842,7 +842,7 @@ main(int argc, char *argv[])
 
      * PLAYOS_SHELL_LVGL_SPIKE=1 is set; draws its own screen over the shell. */
 
-    playos_lvgl_spike_init(s->output_width, s->output_height);
+    playos_lvgl_spike_init(s, s->output_width, s->output_height);
 
 
     while (s->running && !WindowShouldClose()) {

@@ -22,12 +22,17 @@
 #include <raylib.h>
 #include <stdlib.h>
 
+#include "shell.h"   /* the shell's controller state, for the LVGL indev */
+
 static int g_w, g_h;   /* the shell's output size */
 
 static Texture2D     g_tex;
 static lv_display_t *g_disp;
 static uint8_t      *g_buf;
 static int           g_frames;
+static struct playos_shell *g_shell;   /* for the input device */
+static lv_indev_t   *g_indev;
+static lv_group_t   *g_group;
 static int           g_state = -1;   /* -1 unknown, 0 off, 1 on */
 
 int
@@ -83,6 +88,9 @@ build_screen(void)
 
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x141820), LV_PART_MAIN);
 
+    g_group = lv_group_create();
+    lv_group_set_default(g_group);
+
     block(scr, 40,  40, 0xFF0000, "RED");
     block(scr, 300, 40, 0x0000FF, "BLUE");
     block(scr, 560, 40, 0x00FF00, "GREEN");
@@ -112,14 +120,55 @@ build_screen(void)
 
         lv_label_set_text_fmt(lbl, "Item %d", i + 1);
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x3E6FA8), LV_PART_MAIN);
+        lv_group_add_obj(g_group, btn);
     }
+
+    /* The row is the gridnav container: d-pad moves between its items, and
+     * rollover keeps focus inside it. This is the controller navigation the sprint
+     * asks LVGL to provide. */
+    lv_gridnav_add(row, LV_GRIDNAV_CTRL_ROLLOVER);
+}
+
+/* LVGL has no gamepad input type: d-pad and face buttons are translated to
+ * LV_KEY_* and a keypad indev drives focus through a group + gridnav. One key per
+ * poll, so simultaneous presses resolve by the order below - enough for a spike,
+ * and the shape any real implementation would keep. */
+static void
+indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    struct playos_shell *s = g_shell;
+
+    (void)indev;
+    data->state = LV_INDEV_STATE_RELEASED;
+
+    if (!s)
+        return;
+
+    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP))
+        data->key = LV_KEY_UP;
+    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN))
+        data->key = LV_KEY_DOWN;
+    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT))
+        data->key = LV_KEY_LEFT;
+    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT))
+        data->key = LV_KEY_RIGHT;
+    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH))
+        data->key = LV_KEY_ENTER;      /* A */
+    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST))
+        data->key = LV_KEY_ESC;        /* B */
+    else
+        return;
+
+    data->state = LV_INDEV_STATE_PRESSED;
 }
 
 void
-playos_lvgl_spike_init(int width, int height)
+playos_lvgl_spike_init(struct playos_shell *shell, int width, int height)
 {
     if (!playos_lvgl_spike_enabled())
         return;
+
+    g_shell = shell;
 
     g_w = width;
     g_h = height;
@@ -143,6 +192,13 @@ playos_lvgl_spike_init(int width, int height)
     lv_display_set_flush_cb(g_disp, flush_cb);
 
     build_screen();
+
+    /* Focus: a group holding the spike's buttons, navigated by gridnav. */
+    g_indev = lv_indev_create();
+    lv_indev_set_type(g_indev, LV_INDEV_TYPE_KEYPAD);
+    lv_indev_set_read_cb(g_indev, indev_read_cb);
+    lv_indev_set_group(g_indev, g_group);
+
 
     TraceLog(LOG_INFO, "LVGL: display %dx%d, RGB888, whole-frame render", g_w, g_h);
 }
@@ -170,7 +226,7 @@ playos_lvgl_spike_frame(float dt_seconds)
 
 /* Built into every shell; inert unless the spike is compiled in. */
 int  playos_lvgl_spike_enabled(void) { return 0; }
-void playos_lvgl_spike_init(int width, int height) { (void)width; (void)height; }
+void playos_lvgl_spike_init(struct playos_shell *shell, int width, int height) { (void)shell; (void)width; (void)height; }
 void playos_lvgl_spike_frame(float dt_seconds) { (void)dt_seconds; }
 
 #endif /* PLAYOS_SHELL_EXPERIMENTAL_LVGL */

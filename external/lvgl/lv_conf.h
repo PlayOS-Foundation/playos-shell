@@ -15,6 +15,11 @@
 #define LV_COLOR_DEPTH 32          /* raylib textures are RGBA8 */
 #define LV_USE_OS LV_OS_NONE       /* the shell has its own frame loop; no RTOS */
 
+/* Portable software rendering only: LVGL's default auto-detect selected the ARM
+ * Helium assembly blend on this x86-64 cross build and failed to assemble it. NONE
+ * is the portable C path and the honest choice for a spike. */
+#define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
+
 /* ── Logging (routed through LVGL's own log, off by default) ───────────────── */
 #define LV_USE_LOG 1
 #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN

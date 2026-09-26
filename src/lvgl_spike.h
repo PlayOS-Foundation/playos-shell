@@ -15,7 +15,9 @@ int  playos_lvgl_spike_enabled(void);
 
 /* Creates the LVGL display at the shell's output size and the test screen.
  * Safe to call when disabled. */
-void playos_lvgl_spike_init(int width, int height);
+struct playos_shell;
+
+void playos_lvgl_spike_init(struct playos_shell *shell, int width, int height);
 
 /* Pumps LVGL (tick + timers) and draws its texture. Call once per frame. */
 void playos_lvgl_spike_frame(float dt_seconds);
