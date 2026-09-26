@@ -31,9 +31,11 @@ static Texture2D     g_tex;
 static lv_display_t *g_disp;
 static uint8_t      *g_buf;
 static int           g_frames;
+static int           g_flushes;   /* how often LVGL handed us pixels */
 static struct playos_shell *g_shell;   /* for the input device */
 static lv_indev_t   *g_indev;
 static lv_group_t   *g_group;
+static uint32_t      g_last_key;
 static int           g_state = -1;   /* -1 unknown, 0 off, 1 on */
 
 int
@@ -63,6 +65,25 @@ flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     int32_t w = area->x2 - area->x1 + 1;
     int32_t h = area->y2 - area->y1 + 1;
+
+    g_flushes++;
+
+    /* LVGL's RGB888 is stored B,G,R in memory - measured on the Ally, where the
+     * "RED" block came out blue - while raylib's PIXELFORMAT_UNCOMPRESSED_R8G8B8 is
+     * R,G,B. Swap the outer channels. Cheap in practice: a flush only happens when
+     * LVGL has something new, and in FULL render mode it always rewrites the whole
+     * buffer, so swapping in place is safe. */
+    {
+        uint8_t *px = px_map;
+        size_t   n  = (size_t)w * (size_t)h;
+
+        for (size_t i = 0; i < n; i++, px += 3) {
+            uint8_t tmp = px[0];
+
+            px[0] = px[2];
+            px[2] = tmp;
+        }
+    }
 
     UpdateTextureRec(g_tex,
                      (Rectangle){ (float)area->x1, (float)area->y1, (float)w, (float)h },
@@ -128,7 +149,14 @@ build_screen(void)
 
         lv_label_set_text_fmt(lbl, "Item %d", i + 1);
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x3E6FA8), LV_PART_MAIN);
+        /* A visible focused state: without it "the d-pad does nothing" is not
+         * distinguishable from "focus moved but nothing showed it". */
+        lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN | LV_STATE_FOCUSED);
+        lv_obj_set_style_border_color(btn, lv_color_hex(0xFFD24A),
+                                      LV_PART_MAIN | LV_STATE_FOCUSED);
         lv_group_add_obj(g_group, btn);
+        if (i == 0)
+            lv_group_focus_obj(btn);   /* keypad input needs a focused object */
     }
 
     /* The row is the gridnav container: d-pad moves between its items, and
@@ -147,25 +175,43 @@ indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     struct playos_shell *s = g_shell;
 
     (void)indev;
-    data->state = LV_INDEV_STATE_RELEASED;
 
-    if (!s)
+    if (!s) {
+        data->key = g_last_key;
+        data->state = LV_INDEV_STATE_RELEASED;
         return;
+    }
 
-    if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_UP))
-        data->key = LV_KEY_UP;
-    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_DOWN))
-        data->key = LV_KEY_DOWN;
-    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_LEFT))
-        data->key = LV_KEY_LEFT;
-    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_DPAD_RIGHT))
-        data->key = LV_KEY_RIGHT;
-    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_SOUTH))
+    /* held(), not pressed(): LVGL's keypad device wants a *level* - PRESSED while
+    * the button is down - while the shell's pressed() is an edge that is true for
+    * one shell frame. Sampling an edge from a periodic timer misses taps, which is
+    * exactly what the device showed: the focus moved, but not on every press. */
+    /* NEXT/PREV, not the arrows: a plain LVGL group navigates on these, while the
+     * arrow keys are the widget-level (gridnav) convention. Verified on the device:
+     * the arrows arrived correctly (17/19/20) and moved nothing, because gridnav
+     * was not doing the handling. NEXT/PREV is the keypad-driven group pattern. */
+    if (shell_input_button_held(s, PLAYOS_BUTTON_DPAD_UP) ||
+        shell_input_button_held(s, PLAYOS_BUTTON_DPAD_LEFT))
+        data->key = LV_KEY_PREV;
+    else if (shell_input_button_held(s, PLAYOS_BUTTON_DPAD_DOWN) ||
+             shell_input_button_held(s, PLAYOS_BUTTON_DPAD_RIGHT))
+        data->key = LV_KEY_NEXT;
+    else if (shell_input_button_held(s, PLAYOS_BUTTON_SOUTH))
         data->key = LV_KEY_ENTER;      /* A */
-    else if (shell_input_button_pressed(s, PLAYOS_BUTTON_EAST))
+    else if (shell_input_button_held(s, PLAYOS_BUTTON_EAST))
         data->key = LV_KEY_ESC;        /* B */
-    else
+    else {
+        data->key = g_last_key;    /* LVGL needs the released key to see the edge */
+        data->state = LV_INDEV_STATE_RELEASED;
         return;
+    }
+
+    /* TEMPORARY (Sprint 22 T4): the d-pad moves nothing, so record what the shell
+     * actually reports. Logged on change only. */
+    if (data->key != g_last_key) {
+        TraceLog(LOG_INFO, "LVGL: indev key %lu", (unsigned long)data->key);
+        g_last_key = data->key;
+    }
 
     data->state = LV_INDEV_STATE_PRESSED;
 }
@@ -184,6 +230,12 @@ playos_lvgl_spike_init(struct playos_shell *shell, int width, int height)
     lv_init();
 
     Image img = GenImageColor(g_w, g_h, BLACK);
+
+    /* The texture's format must match the data LVGL hands us. Loading the default
+     * RGBA8 and uploading RGB888 made UpdateTextureRec read four bytes per pixel
+     * from three-byte data, so the "alpha" byte came from the next pixel's red -
+     * near zero for a dark UI, i.e. an invisible, fully transparent sprite. */
+    ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8);
 
     g_tex = LoadTextureFromImage(img);
     UnloadImage(img);
@@ -218,6 +270,20 @@ playos_lvgl_spike_frame(float dt_seconds)
         return;
 
     g_frames++;
+
+    /* TEMPORARY (Sprint 22 T4): the spike runs but nothing appears and the frame
+     * cost is unchanged, so report what the frame path actually does. Rate-limited
+     * to one line every ~5 s. */
+    {
+        static float acc = 0.0f;
+
+        acc += dt_seconds;
+        if (acc >= 5.0f) {
+            TraceLog(LOG_INFO, "LVGL: frames=%d flushes=%d tex=%dx%d",
+                     g_frames, g_flushes, g_tex.width, g_tex.height);
+            acc = 0.0f;
+        }
+    }
 
     lv_tick_inc((uint32_t)(dt_seconds * 1000.0f));   /* raylib's frame time is the tick */
     lv_timer_handler();
